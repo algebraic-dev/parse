@@ -3,12 +3,12 @@
 It"s a protocol parser generator for Lean4, currently, it only generates Lean4. It uses lean macros to generate lean code that is optimized. It's based on https://github.com/nodejs/llparse.
 
 ```lean
-parser parseHttp where
+parser parseHttp : HttpData, HttpState Nat exception String where
     def method : Nat
-    def url : Span
-    
+    def url : Nat × Nat
+
     node method where
-        switch (store method onMeth)
+        switch (store method beforeUrl)
             | "HEAD" => 0
             | "GET" => 1
             | "POST" => 2
@@ -18,18 +18,18 @@ parser parseHttp where
             | "CONNECT" => 6
             | "TRACE" => 7
             | "PATCH" => 8
-        otherwise (error 1)
-    
+        otherwise (error "cannot match metho")
+
     node beforeUrl where
         is " " beforeUrl
-        otherwise (start url onUrl)
+        goto (start url url)
 
-    node onUrl where
+    node url where
         peek ' ' (end url http)
         otherwise url
-    
+
     node http where
-        is " HTTP/1.1\r\n\r\n" complete
-        otherwise (error 6)
+        is " HTTP/1.1\r\n\r\n" http
+        otherwise (error "cannot match http header")
 ```
 
