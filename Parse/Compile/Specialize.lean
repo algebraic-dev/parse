@@ -44,6 +44,9 @@ def Case.specialize (char: Char) (case: Case) : Option Case :=
       else none
 
 def Case.fromMatcher : Matcher → Array Case
+  -- Need to make some optimization in order to run it faster.
+  | .select _ alts inv =>
+    alts.map (λ⟨place, string⟩ => {place, string := string.toString, created := true, capture := true, inv, data := none})
   | .switch _ cases inv =>
     cases.map (λ⟨place, string, data⟩ => {place, string, created := true, capture := true, inv, data := some data})
   | .is place string inv =>

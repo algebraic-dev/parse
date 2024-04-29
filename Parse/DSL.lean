@@ -21,6 +21,8 @@ declare_syntax_cat clause
 declare_syntax_cat invoker
 declare_syntax_cat node
 
+syntax (name := charsArr) "[" char* "]" : term
+
 syntax (name := invokerCallback) "(" "callback" term "then" ident ")" : invoker
 syntax (name := invokerStore) "(" "store" ident ident ")" : invoker
 syntax (name := invokerStart) "(" "start" ident ident ")" : invoker
@@ -32,6 +34,7 @@ syntax (name := switchClause) "|" str "=>" term : clause
 
 syntax (name := switchDef) "switch" invoker clause* : parsers
 syntax (name := isDef) "is" str invoker : parsers
+syntax (name := isAllDef) "is" charsArr invoker : parsers
 syntax (name := otherwiseDef) "otherwise" invoker : parsers
 syntax (name := gotoDef) "goto" invoker : parsers
 syntax (name := peekDef) "peek" char invoker : parsers
@@ -75,6 +78,10 @@ def parseMatchers (syn: TSyntax `parsers) : CommandElabM Matcher :=
   | `(otherwiseDef | otherwise $inv) => do
     let inv ← parseInvoker inv
     pure (Matcher.otherwise syn inv)
+  | `(isAllDef | is [$chars*] $inv) => do
+    let chars := chars.map (λ(x: TSyntax `char) => (x.raw, TSyntax.getChar x))
+    let inv ← parseInvoker inv
+    pure (Matcher.select syn chars inv)
   | `(gotoDef | goto $inv) => do
     let inv ← parseInvoker inv
     pure (Matcher.goto syn inv)

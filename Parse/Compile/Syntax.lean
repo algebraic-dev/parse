@@ -44,6 +44,7 @@ def Invoker.nodeName (map: DupMap) : Invoker → DupMap
 inductive Matcher
   | switch (syn: Lean.Syntax) (cases: Array (Syntax × String × Syntax)) (inv: Invoker)
   | is (syn: Lean.Syntax) (prop: String) (inv: Invoker)
+  | select (syn: Lean.Syntax) (prop: Array (Lean.Syntax × Char)) (inv: Invoker)
   | peek (syn: Lean.Syntax) (prop: Char) (inv: Invoker)
   | otherwise (syn: Lean.Syntax) (inv: Invoker)
   | goto (syn: Lean.Syntax) (inv: Invoker)
@@ -51,6 +52,7 @@ inductive Matcher
 
 def Matcher.nodeName (dupMap: DupMap) : Matcher → DupMap
   | .switch _ _ inv => inv.nodeName dupMap
+  | .select _ _ inv => inv.nodeName dupMap
   | .is _ _ inv => inv.nodeName dupMap
   | .peek _ _ inv => inv.nodeName dupMap
   | .otherwise _ inv => inv.nodeName dupMap
