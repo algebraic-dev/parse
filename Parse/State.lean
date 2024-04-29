@@ -6,6 +6,9 @@ namespace Parse.State
 
 open Lean
 
+def Span := Nat × Nat
+deriving instance Inhabited for Span
+
 inductive StringMatch
   | succeded
   | failed
