@@ -140,8 +140,10 @@ def compileMachine (names: Array (TSyntax `ident)) (machine: Machine) : CommandE
   let failedIdent := mkIdent (Name.str machine.tags.state.getId "failed")
   let callbackIdent := mkIdent (Name.str machine.tags.state.getId "callback")
 
+  let func := machine.tags.parser
+
   let alts := alts.push (← `(Parser.Term.matchAltExpr | | $failIdent code => (data, $failIdent code, s)))
-  let alts := alts.push (← `(Parser.Term.matchAltExpr | | $callbackIdent _ next => (data, next, s)))
+  let alts := alts.push (← `(Parser.Term.matchAltExpr | | $callbackIdent _ next => $func data next s))
   let alts := alts.push (← `(Parser.Term.matchAltExpr | | $failedIdent => (data, $failedIdent, s)))
 
   let alts := mkNode ``Term.matchAlts #[mkNullNode alts]
