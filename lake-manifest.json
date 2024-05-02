@@ -1,5 +1,14 @@
 {"version": 7,
  "packagesDir": ".lake/packages",
- "packages": [],
+ "packages":
+ [{"url": "https://github.com/tydeu/lean4-alloy.git",
+   "type": "git",
+   "subDir": null,
+   "rev": "04e2bae7838072ad6d0793cef68dc11fa6519d18",
+   "name": "alloy",
+   "manifestFile": "lake-manifest.json",
+   "inputRev": null,
+   "inherited": false,
+   "configFile": "lakefile.lean"}],
  "name": "Parse",
  "lakeDir": ".lake"}
