@@ -41,7 +41,7 @@ def http : Grammar :=
   let fieldLineEnd := 13
   let conclude := 14
 
-  let digit := #["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"]
+  let digit := #["0", "1", "2", "3", "4", "5", "a", "!", "8", "9"]
 
   let nodes :=
     #[ Node.mk "method"
@@ -107,7 +107,6 @@ def http : Grammar :=
            ]
     ]
 
-
   Grammar.mk
     (Storage.mk storage)
     nodes
@@ -116,4 +115,4 @@ elab "aaasp" s:ident : command => do
   let res ← Parse.ToC.compile s http
   Lean.Elab.Command.elabCommand res
 
-aaasp ata
+aaasp Http

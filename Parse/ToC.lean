@@ -195,6 +195,13 @@ partial def compileInstruction (code: Array (TSyntax `cStmtLike)): Parse.Compile
   | .error errCode => do
       return code.push (← `(cStmt| return -$(mkNumLit (errCode + 1));))
 
+def compileTyp : Typ → Ident
+ | .u8 => mkIdent "uint8_t"
+ | .u16 => mkIdent "uint8_t"
+ | .u32 => mkIdent "uint32_t"
+ | .char => mkIdent "uint8_t"
+ | .span => mkIdent "uint64_t"
+
 def compileGrammar (name: Ident) (grammar: Syntax.Grammar) : CompileM Syntax := do
   let mut branches := #[]
 
@@ -212,18 +219,17 @@ def compileGrammar (name: Ident) (grammar: Syntax.Grammar) : CompileM Syntax := 
   let states := withSep states
 
   let fields ← machine.storage.nodes.mapM $ λ(name, typ) => do
-    let typ := match typ with
-      | .u8 => mkIdent "uint8_t"
-      | .char => mkIdent "uint8_t"
-      | .u32 => mkIdent "uint32_t"
-      | .u16 => mkIdent "uint16_t"
-      | .span => mkIdent "span_t"
-    let ident := mkIdent name
-    `(Alloy.C.aggrDeclaration| $typ $ident; )
+    let ident := match typ with
+      | .span => mkIdent s!"{name}_pos_start"
+      | _ => mkIdent name
+    `(Alloy.C.aggrDeclaration| $(compileTyp typ) $ident; )
 
-  let zero := mkCharLit (Char.ofNat 0)
+  let maps ← CompileM.get CompileState.maps
+  let maps ← maps.toArray.mapM $ λ(int, nat) => genBitMap (genIdent "bitmap" nat) int
 
-  `(alloy c include "lean/lean.h" "stdlib.h" "stdio.h"
+  `(namespace $name
+
+    alloy c include "lean/lean.h" "stdlib.h" "stdio.h" "string.h"
 
     alloy c section
     #define fail 0
@@ -234,16 +240,15 @@ def compileGrammar (name: Ident) (grammar: Syntax.Grammar) : CompileM Syntax := 
       $states,*
     };
 
-    typedef struct pair {
-      const char* start;
-      const char* close;
-    } span_t;
-
     typedef struct data_t {
+      uint16_t state;
       uint8_t call;
       uint8_t pointer;
       $fields*
     } data_t;
+
+    $maps*
+
     end
 
     alloy c opaque_extern_type Data => data_t where
@@ -251,15 +256,17 @@ def compileGrammar (name: Ident) (grammar: Syntax.Grammar) : CompileM Syntax := 
       finalize(s) := lean_dec(s->m_s); free(s)
 
     alloy c extern
-    def $(mkIdent "createData") (s: Unit) : Data := {
+    def $(mkIdent "init") (initialState: UInt32) : Data := {
       data_t* data = calloc(sizeof(data_t), 0);
-      return to_lean<Data>(data);
+      data->state = initialState;
+      lean_obj_res res = to_lean<Data>(data);
+      return res;
     }
 
     alloy c section
       uint32_t match_string(data_t *data, const char* p, char* s, int len) {
         p += data->pointer;
-        for(; *p != $zero; p++) {
+        for(; *p != '\x00'; p++) {
           if (data->pointer == len-1) {
             data->pointer = 0;
             return succeded;
@@ -282,12 +289,21 @@ def compileGrammar (name: Ident) (grammar: Syntax.Grammar) : CompileM Syntax := 
     end
 
     alloy c extern
-    def $name (data_obj: @&Data) (state: UInt32) (s: String) : UInt32 := {
-      const char* str = lean_string_cstr(s);
-      data_t* data = lean_get_external_data(data_obj);
-      int res = alloy_parse(state, data, str);
-      return res;
+    def $(mkIdent "state") (data_obj: Data) : UInt32 := {
+      data_t* data_internal = lean_get_external_data(data_obj);
+      return data_internal->state;
     }
+
+    alloy c extern
+    def $(mkIdent "feed") (data: @& Data) (state: UInt32) (s: String) : BaseIO UInt32 := {
+      const char* str = lean_string_cstr(s);
+      data_t* data_internal = lean_get_external_data(data);
+      int res = alloy_parse(state, data_internal, str);
+      data_internal->state = res;
+      return lean_io_result_mk_ok(lean_box_uint32(res));
+    }
+
+    end $name
    )
 
 def compile (name: Ident) (grammar: Syntax.Grammar) : CommandElabM Syntax :=
