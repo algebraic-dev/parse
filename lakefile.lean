@@ -13,5 +13,6 @@ lean_lib «Parse» where
 @[default_target]
 lean_exe Exe where
   root := `Main
+  moreLeancArgs := #["-g"]
 
 require alloy from git "https://github.com/tydeu/lean4-alloy.git"

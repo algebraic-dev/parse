@@ -19,7 +19,7 @@ parser Http where
             | "CONNECT" => 6
             | "TRACE" => 7
             | "PATCH" => 8
-        otherwise (error 1)
+        otherwise (error 122)
 
     node beforeUrl where
         is " " beforeUrl
@@ -27,8 +27,8 @@ parser Http where
 
     node url where
         peek ' ' (end url http)
-        otherwise url
+        any url
 
     node http where
         is " HTTP/1.1\r\n\r\n" http
-        otherwise (error 2)
+        otherwise (error 3)

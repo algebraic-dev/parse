@@ -42,6 +42,7 @@ def Problem.stepsNum (problem: Problem α) : Nat
   := problem
   |> Array.map Case.length
   |> Array.foldl Nat.max 0
+  |> (· + 1)
 
 /-- Creates a problem out of cases -/
 def Problem.ofCases (case: Array Parse.Syntax.Case) : Array (Case Parse.Syntax.Action) :=

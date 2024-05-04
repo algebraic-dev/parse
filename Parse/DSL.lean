@@ -62,6 +62,7 @@ structure Names where
   properties: HashMap String Nat
   callback: HashMap String Nat
   nodes: HashMap String Nat
+  callbacks: Array String
 
 def ensure (syn: Syntax) (name: String) (func: String → Option α) : CommandElabM α :=
   match func name with
@@ -164,8 +165,14 @@ elab "parser " name:ident "where" synProps:propertyDef* synCalls:callbackDef* sy
 
   let nodeNames ← synNodes.mapM getNodeName
   let propNames := props.map Prod.fst
-  let callNames ← synCalls.mapM parseCall
-  let names := Names.mk (arrToMap propNames) (arrToMap callNames) (arrToMap nodeNames)
+
+  let callNames ← synCalls.mapM (λx => (·, false) <$> parseCall x)
+
+  -- Add callback for spans
+  let callNames := callNames.append (props.filterMap $ λx => match x.snd with |.span => (x.fst, true) | _ => none)
+
+  let callStrs := callNames.map Prod.fst
+  let names := Names.mk (arrToMap propNames) (arrToMap callStrs) (arrToMap nodeNames) callStrs
 
   let nodes ← synNodes.mapM (parseNode names)
   let storage := Storage.mk props callNames

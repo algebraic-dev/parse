@@ -48,9 +48,8 @@ inductive Instruction : Bool → Type where
   | next (chars: Nat) (next: Instruction α) : Instruction α
   | store (prop: Nat) (data: Option Nat) (next: Instruction α) : Instruction α
   | capture (prop: Nat) (next: Instruction α) : Instruction α
-  | close (prop: Nat) (next: Instruction α) : Instruction α
-  | check (next: Instruction α) : Instruction α
-  | call (code: Nat) (next: Instruction α) : Instruction α
+  | close (prop: Nat) (next: Nat) : Instruction α
+  | call (code: Nat) (next: Nat) : Instruction α
   | goto (to: Nat) : Instruction α
   | error (code: Nat) : Instruction α
   deriving Repr, Hashable
@@ -104,8 +103,8 @@ def CompileM.run (monad: CompileM α) : Machine :=
 def compileAction' (data: Option Nat) : Action → Instruction α
   | .store Capture.data prop to => Instruction.store prop data (Instruction.goto to)
   | .store Capture.begin prop to => Instruction.capture prop (Instruction.goto to)
-  | .store Capture.close prop to => Instruction.close prop (Instruction.goto to)
-  | .call prop to => Instruction.call prop (Instruction.goto to)
+  | .store Capture.close prop to => Instruction.close prop to
+  | .call prop to => Instruction.call prop to
   | .goto to => Instruction.goto to
   | .error code => Instruction.error code
 
