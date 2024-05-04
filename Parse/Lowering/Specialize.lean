@@ -1,0 +1,85 @@
+import Parse.Lowering.Specialize.Problem
+import Parse.Lowering.Specialize.Case
+import Parse.Lowering.Interval
+import Parse.Syntax
+
+/-!
+  This module specializes a bunch of parsers that looks like pattern match to a tree that matches
+  one thing at a time.
+-/
+
+namespace Parse.Lowering.Specialize
+
+open Parse.Lowering.Interval
+open Parse.Syntax
+
+/-- Match is what checks a subject and what says what`s next after matching -/
+structure Match (k: Type) (v: Type) where
+  subject: k
+  capture: Bool
+  next: v
+  deriving Hashable, Repr
+
+/-- The action and some info to execute after matching something -/
+structure Step (α: Type) where
+  data: Option Nat
+  capture: Bool
+  next: α
+  deriving Hashable, Repr
+
+def Step.ofCase (case: Case α) : Step α :=
+  Step.mk case.store case.capture case.action
+
+/-- Branches of different types -/
+inductive Branch (α: Type)
+  | string (next: Match String α)
+  | chars (chars: Array (Match Char α))
+  deriving Hashable, Repr
+
+/-- Matching tree -/
+inductive Tree (α: Type) where
+  | branch (cases: Branch (Tree α)) (default: Step α)
+  | done (step: Step α)
+  | fail
+  deriving Hashable, Repr, Inhabited
+
+abbrev Fuel := Nat
+
+def Problem.accumulate (problem: Problem α) (acc: String) : Fuel → (Problem α × String)
+  | 0 => (problem, acc)
+  | n + 1 =>
+    let prefixes := problem.prefixes
+    if prefixes.size == 1 then
+      let char := prefixes.toArray.get! 0
+      if problem.willMatch char
+        then (problem.specialize char, acc.push char.char)
+        else Problem.accumulate (problem.specialize char) (acc.push char.char) n
+    else (problem, acc)
+
+def Problem.solve' (problem: Problem Action) : Nat → Tree Action
+  | 0 => Tree.fail
+  | n + 1 =>
+    if problem.isEmpty then Tree.fail else
+    if let some res := problem.getDone then
+      Tree.done (Step.mk res.store res.capture res.action)
+    else
+      let otherwise := Step.ofCase $ problem.findDone (Action.error 0)
+      let (problem₂, acc) := Problem.accumulate problem "" n
+
+      -- We don't remove the fuel that is used on the accumulate, it's bad :S
+      let branch := match acc.length with
+      | 0 =>
+        let prefixes := problem₂.prefixes.toArray
+        let chars := prefixes.map (λp => Match.mk p.char p.capture ((problem₂.specialize p).solve' n))
+        Branch.chars chars
+      | 1 =>
+        let p := problem.prefixes.toArray.get! 0
+        Branch.chars #[Match.mk p.char p.capture (problem₂.solve' n)]
+      | _ =>
+        Branch.string (Match.mk acc true (problem₂.solve' n))
+
+      Tree.branch branch otherwise
+
+/-- Solves the problem returning a tree of actions -/
+def Problem.solve (problem: Problem Action) : Tree Action :=
+  problem.solve' problem.stepsNum

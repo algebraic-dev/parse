@@ -1,21 +1,25 @@
-import Lean.Data
-
 /-!
-  High level syntax that describes parsers
+  High-Level Syntax Definition
 -/
 
 namespace Parse.Syntax
-open Lean
 
-/-- Actions that are going to be executed after some matcher matches some input -/
+abbrev Goto := Nat
+
+/-- Indicates if the capture is setting the beginning or the end of a capture -/
+inductive Capture
+  | begin
+  | close
+  | data
+  deriving Inhabited, Hashable, Repr
+
+/-- Action that happens after something is matched with a matcher -/
 inductive Action
-  | store (on: Nat) (goto: Nat)
-  | capture (on: Nat) (goto: Nat)
-  | close (on: Nat) (goto: Nat)
-  | stop (code: Nat) (goto: Nat)
-  | goto (goto: Nat)
+  | store (capture: Capture) (property: Nat) (goto: Goto)
+  | call (callback: Nat) (goto: Goto)
+  | goto (goto: Goto)
   | error (code: Nat)
-  deriving Inhabited, Repr, Hashable
+  deriving Inhabited, Hashable, Repr
 
 /-- An alternative for matching strings -/
 inductive Matcher
@@ -40,15 +44,16 @@ structure Node where
 /-- Typ is a type representation from C -/
 inductive Typ
   | u8
+  | char
   | u16
   | u32
-  | char
   | span
   deriving Inhabited
 
 /-- Storage describes each field that stores some information in  -/
 structure Storage where
   nodes: Array (String × Typ)
+  callback: Array String
   deriving Inhabited
 
 /-- Description of a parser -/

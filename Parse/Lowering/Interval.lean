@@ -1,19 +1,18 @@
 /-!
-  Description of Intervals of ASCII characters to optimize the generate code
+  Definition of ASCII character intervals, useful to compile down to a definition that is the most
+  efficient to check if some character is on a range.
 -/
 
-namespace Parse.Interval
+namespace Parse.Lowering.Interval
 
-abbrev Range :=  {range: UInt8 × UInt8 // range.fst ≤ range.snd }
+/-- Range of well formed ASCII characters -/
+abbrev Range := {range: UInt8 × UInt8 // range.fst ≤ range.snd }
 
 instance : Inhabited Range where
   default := ⟨(0, 0), by decide⟩
 
+/-- Ranges of intervals -/
 abbrev Interval := Array Range
-
-def Range.fromChar (char: Char) : Range :=
-  let char := char.toNat.toUInt8
-  ⟨(char, char), by simp; exact (Nat.le_of_eq rfl)⟩
 
 /-- Sorts and optimizes the interval to a state that it`s easier to test -/
 def Interval.merge (intervals: Interval) : Interval := Id.run do
@@ -37,10 +36,19 @@ def Interval.merge (intervals: Interval) : Interval := Id.run do
 
   return merged
 
-/-- Test if some Uint8 is in the interval -/
-def Interval.in (int: Interval) (c: UInt8) : Bool :=
-  int.any (λ i => i.val.fst ≤ c && c ≤ i.val.snd)
+/-- Creates a range that only one char belongs -/
+def Range.ofChar (char: Char) : Range :=
+  let char := char.toNat.toUInt8
+  ⟨(char, char), by simp; exact (Nat.le_of_eq rfl)⟩
 
-def Interval.fromChars (chars: Array Char) :=
-  chars.map Range.fromChar
+def Range.in (range: Range) (char: UInt8) : Bool :=
+  range.val.fst ≤ char && char ≤ range.val.snd
+
+/-- Creates an interval from chars -/
+def Interval.ofChars (chars: Array Char) :=
+  chars.map Range.ofChar
   |> Interval.merge
+
+/-- Checks if a char belongs to an interval -/
+def Interval.in (int: Interval) (char: UInt8) : Bool :=
+  int.any (Range.in · char)
