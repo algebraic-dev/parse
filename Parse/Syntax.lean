@@ -29,12 +29,17 @@ inductive Action
   | error (code: Nat)
   deriving Inhabited, Hashable, Repr
 
+inductive MethodOrCall
+  | method (name: Nat)
+  | call (call: Call)
+  deriving Repr, Hashable
+
 /-- An alternative for matching strings -/
 inductive Case
   | is (matchers: Array String) (action : Action)
   | peek (matchers: Array Char) (action : Action)
   | switch (matchers: Array (String × Nat)) (action : Action)
-  | select (callback: Call) (matchers: Array (Nat × Action))
+  | select (callback: MethodOrCall) (matchers: Array (Nat × Action))
   | goto (consume: Bool) (action : Action)
   deriving Inhabited
 

@@ -18,7 +18,7 @@ structure Prefix where
 
 inductive Action where
   | single (act: Syntax.Action)
-  | select (call: Syntax.Call) (acts: Array (Nat × Syntax.Action))
+  | select (call: Syntax.MethodOrCall) (acts: Array (Nat × Syntax.Action))
 
 /-- Subject is the string to test -/
 def Subject := Substring

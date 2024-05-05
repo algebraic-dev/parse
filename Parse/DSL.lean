@@ -54,6 +54,7 @@ syntax (name := switchClause) "|" str "=>" term : clause
 syntax (name := selectClause) "|" num "=>" action : selectClause
 
 syntax (name := switchDef) "switch" action_enclose clause* : parsers
+syntax (name := selectIdentDef) "select" "(" &"read" ident ")" selectClause* : parsers
 syntax (name := selectDef) "select" code selectClause* : parsers
 
 syntax (name := isDef) "is" str action_enclose : parsers
@@ -165,10 +166,14 @@ def parseMatchers (names: Names) (syn: TSyntax `parsers) : CommandElabM Case :=
     let arr ← synClauses.sequenceMap parseSwitchClause
     let inv ← parseEnclose names action
     pure (Case.switch arr inv)
-  | `(selectDef | select $caller $synClauses*) => do
+  | `(selectIdentDef | select (read $property:ident) $synClauses*) => do
+    let property ← ensure syn property.getId.toString names.properties.find?
+    let arr ← synClauses.sequenceMap (parseSelectClause names)
+    pure (Case.select (MethodOrCall.method property) arr)
+  | `(selectDef | select $caller:code $synClauses*) => do
     let inv ← parseCode names caller
     let arr ← synClauses.sequenceMap (parseSelectClause names)
-    pure (Case.select inv arr)
+    pure (Case.select (MethodOrCall.call inv) arr)
   | `(isDef | is $str:str $inv) => do
     let inv ← parseEnclose names inv
     pure (Case.is #[str.getString] inv)
@@ -195,7 +200,7 @@ def parseMatchers (names: Names) (syn: TSyntax `parsers) : CommandElabM Case :=
   | `(otherwiseDef | otherwise $inv) => do
     let inv ← parseEnclose names inv
     pure (Case.goto false inv)
-  | syn => Lean.throwErrorAt syn "unsupported syntax"
+  | syn => Lean.throwErrorAt syn "unsupported matcher"
 
 def parseNode (names: Names) : TSyntax `Parse.DSL.nodeDef → CommandElabM Node
   | `(nodeDef| node $name where $synParsers*)

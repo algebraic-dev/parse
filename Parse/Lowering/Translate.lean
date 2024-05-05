@@ -45,7 +45,7 @@ inductive Consumer (inst: Type) where
 
 inductive Instruction : Bool → Type where
   | consumer (consumer: Consumer (Instruction false)) : Instruction true
-  | select (code: Call) (alts: Array (Nat × (Instruction false))) : Instruction α
+  | select (code: MethodOrCall) (alts: Array (Nat × (Instruction false))) : Instruction α
   | next (chars: Nat) (next: Instruction α) : Instruction α
   | store (prop: Nat) (data: Option Nat) (next: Instruction α) : Instruction α
   | capture (prop: Nat) (next: Instruction α) : Instruction α
