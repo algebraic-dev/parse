@@ -48,8 +48,9 @@ inductive Instruction : Bool → Type where
   | next (chars: Nat) (next: Instruction α) : Instruction α
   | store (prop: Nat) (data: Option Nat) (next: Instruction α) : Instruction α
   | capture (prop: Nat) (next: Instruction α) : Instruction α
-  | close (prop: Nat) (next: Nat) : Instruction α
-  | call (code: Nat) (next: Nat) : Instruction α
+  | consume (prop: Nat) (next: Instruction α) : Instruction α
+  | close (prop: Nat) (next: Instruction α) : Instruction α
+  | call (code: Call) (next: Instruction α) : Instruction α
   | goto (to: Nat) : Instruction α
   | error (code: Nat) : Instruction α
   deriving Repr, Hashable
@@ -103,19 +104,22 @@ def CompileM.run (monad: CompileM α) : Machine :=
 def compileAction' (data: Option Nat) : Action → Instruction α
   | .store Capture.data prop to => Instruction.store prop data (Instruction.goto to)
   | .store Capture.begin prop to => Instruction.capture prop (Instruction.goto to)
-  | .store Capture.close prop to => Instruction.close prop to
-  | .call prop to => Instruction.call prop to
+  | .store Capture.close prop to => Instruction.close prop (Instruction.goto to)
+  | .consume prop to => Instruction.consume prop (Instruction.goto to)
+  | .call prop to => Instruction.call prop (Instruction.goto to)
   | .goto to => Instruction.goto to
   | .error code => Instruction.error code
+
+def gotoNext (jump: Nat) (to: Nat) : Instruction α :=
+  if jump != 0 then (Instruction.next jump (Instruction.goto to)) else Instruction.goto to
 
 -- The capture begin always start before the next instruction
 def compileAction (jump: Nat) (step: Step Action) : Instruction α :=
   let jump := if step.capture then Nat.max 1 jump else jump
   match step.next with
-  | .store Capture.begin prop to =>
-    if jump != 0
-      then Instruction.capture prop (Instruction.next jump (Instruction.goto to))
-      else Instruction.capture prop (Instruction.goto to)
+  | .call prop to => Instruction.call prop (gotoNext jump to)
+  | .store Capture.begin prop to => Instruction.capture prop (gotoNext jump to)
+  | .store Capture.data prop to => Instruction.store prop step.data (gotoNext jump to)
   | action =>
     let inst := compileAction' step.data action
     if jump != 0 then Instruction.next jump inst else inst
@@ -172,7 +176,7 @@ partial def compileTree (jump: Nat) (b: Bool) : Tree Action → CompileM (Instru
     let result := Instruction.consumer result
 
     match b with
-    | true  =>
+    | true =>
       pure (if jump != 0 then Instruction.next jump result else result)
     | false => do
       let place ← CompileM.addNode

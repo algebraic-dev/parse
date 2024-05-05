@@ -24,6 +24,7 @@ structure CompileState where
   state : Nat
   names : Array String
   props : Array String
+  calls : Array String
   maps: HashMap Interval Nat
   deriving Inhabited
 
@@ -116,6 +117,21 @@ mutual
       let alts := alts.append otherwise
       return code.append alts
 
+  partial def compileCode (code: Code) : Call → CompileM Code
+    | .arbitrary n => do
+      let names ← CompileM.get CompileState.calls
+      let name := mkIdent s!"on_{names[n]!}"
+      return code.push (← `(cStmt| lean_apply_1(data->callbacks.$name, data->data)))
+    | .loadNum n => do
+      let names ← CompileM.get CompileState.names
+      let name := mkIdent s!"prop_{names[n]!}"
+      return  code.push (← `(cStmt| data->$name = *p - '0';))
+    | .mulAdd n => do
+      let names ← CompileM.get CompileState.names
+      let name := mkIdent s!"prop_{names[n]!}"
+      let code := code.push (← `(cStmt| data->$name *= 10;))
+      return  code.push (← `(cStmt| data->$name += *p - '0';))
+
   partial def compileInstruction (code: Code) : Instruction β → CompileM Code
     | .next num next => do
       let code := code.push (← `(cStmt| p += $(mkNumLit num);))
@@ -131,18 +147,29 @@ mutual
       compileInstruction code next
     | .capture prop next => do
       let names ← CompileM.get CompileState.names
-      let prop := mkIdent s!"prop_{names.get! prop}_start_span"
+      let prop := mkIdent s!"prop_{names.get! prop}_start_pos"
       let code := code.push (← `(cStmt| data->$(prop) = $pointerName;))
+      compileInstruction code next
+    | .consume prop next => do
+      let names ← CompileM.get CompileState.names
+      let prop := mkIdent s!"prop_{names.get! prop}"
+      let code := code.push (← `(cStmt| p += data->$prop;))
+      compileInstruction code next
+    | .close prop next => do
+      let names ← CompileM.get CompileState.names
+      let name := mkIdent s!"on_{names[prop]!}"
+      let start ← `(cExpr| lean_unsigned_to_nat(start));
+      let close ← `(cExpr| lean_unsigned_to_nat((uint64_t)p - (uint64_t)data->string));
+      let code := code.push (← `(cStmtLike| int start = (uint64_t)data->$(mkIdent s!"prop_{names[prop]!}_start_pos")-(uint64_t)data->string;))
+      let code := code.push (← `(cStmtLike| data->$(mkIdent s!"prop_{names[prop]!}_start_pos") = NULL;))
+      let code := code.push (← `(cStmtLike| lean_apply_3(data->callbacks.$name, $start, $close, data->data)))
       compileInstruction code next
     | .goto to => do
       let state := genParseIdent "state" to
       return code.push (← `(cStmt| goto $state:ident;))
-    | .call n to => do
-      let state := genParseIdent "state" to
-      return code.push (← `(cStmt| return $state:ident;))
-    | .close prop to => do
-      let state := genParseIdent "state" to
-      return code.push (← `(cStmt| return $state:ident;))
+    | .call call next => do
+      let code ← compileCode code call
+      compileInstruction code next
     | .error errCode => do
       return code.push (← `(cStmt| return -$(mkNumLit (errCode + 1));))
     | .consumer consumer =>
@@ -154,10 +181,11 @@ def compileTyp : Typ → Ident
   | .char => mkIdent "uint8_t"
   | .u16 => mkIdent "uint16_t"
   | .u32 => mkIdent "uint32_t"
+  | .u64 => mkIdent "uint64_t"
   | .span => mkIdent "span_t"
 
 def compilePropName (name: String) : Typ → Ident
-  | .span => mkIdent s!"prop_{name}_start_span"
+  | .span => mkIdent s!"prop_{name}_start_pos"
   | _ => mkIdent s!"prop_{name}"
 
 -- Commands
@@ -173,7 +201,7 @@ def enumStates (machine: Machine) : CommandElabM (TSyntax `cCmd) := do
 
 def callbacksStruct (storage: Storage) : CommandElabM (TSyntax `cCmd) := do
   let fields ← storage.callback.mapM $ λ(name, _) =>
-    let name := mkIdent $ Name.mkStr1 name
+    let name := mkIdent $ Name.mkStr1 s!"on_{name}"
     `(Alloy.C.aggrDeclaration| lean_object *$name:ident )
 
   `(cCmd|
@@ -182,19 +210,31 @@ def callbacksStruct (storage: Storage) : CommandElabM (TSyntax `cCmd) := do
     } callbacks_t;
   )
 
+def getter (field: String) : CommandElabM (TSyntax `command) := do
+  let prop := mkIdent (Name.mkStr2 "Data" field)
+  let propName := mkIdent s!"prop_{field}"
+  `(command |
+    alloy c extern
+      def $prop {α: Type} (data_obj: $(mkIdent "Data") α) : UInt64 := {
+        data_t* data = lean_get_external_data(data_obj);
+        return data->$propName;
+      }
+  )
 
 def dataStruct (storage: Storage) : CommandElabM (TSyntax `cCmd) := do
-  let fields ← storage.nodes.mapM $ λ(name, typ) => do
+  let fields ← storage.props.mapM $ λ(name, typ) => do
     let typName := compileTyp typ
     let ident := compilePropName name typ
     `(Alloy.C.aggrDeclaration| $typName $ident; )
 
   `(cCmd|
     typedef struct data_t {
-      lean_object* str;
-      char* str_cont;
-      uint8_t stopped;
+      lean_object* data;
 
+      const char* string;
+      callbacks_t callbacks;
+
+      uint64_t str_ptr;
       uint64_t state;
       uint8_t pointer;
 
@@ -210,7 +250,7 @@ def matchStr : CommandElabM (TSyntax `cCmd) := do
         if (data->pointer == len-1) {
           data->pointer = 0;
           return SUCCEEDED;
-        } else if (*$pointerName == s[data->pointer]) {
+        } else if (*p == s[data->pointer]) {
           data->pointer += 1;
         } else {
           return FAIL;
@@ -232,9 +272,11 @@ def alloyParse (name: Ident) (branches: Array (TSyntax `cStmtLike)) : CommandEla
   )
 
 def compileBranch (machine: Machine) : CommandElabM (Array (TSyntax `cStmtLike)) := CompileM.run do
-  CompileM.modify (λstate => {state with names := machine.storage.nodes.map Prod.fst})
+  CompileM.modify (λstate => {state with names := machine.storage.props.map Prod.fst
+                                        ,calls := machine.storage.callback.map Prod.fst})
 
   let mut branches := #[]
+
 
   for (idx, inst) in machine.nodes.mapIdx ((·, ·)) do
     CompileM.modify (λmachine => {machine with state := idx })
@@ -245,8 +287,51 @@ def compileBranch (machine: Machine) : CommandElabM (Array (TSyntax `cStmtLike))
   return branches
 
 
-def compile (name: Ident) (machine: Machine) : CommandElabM (TSyntax `command) := do
-  `(
+def spanProps (storage: Storage) : Array String :=
+  storage.props.filterMap $ λ(name, typ) =>
+    match typ with
+    | .span => name
+    | _ => none
+
+def resetSpan (name: String) : CommandElabM (TSyntax `cStmtLike) := do
+  let prop := mkIdent s!"prop_{name}_start_pos"
+  `(cStmtLike|
+    if (data->$prop != NULL) {
+      data->$prop = str;
+    }
+  )
+
+def callSpan (str: String) : CommandElabM (TSyntax `cStmtLike) := do
+  let name := mkIdent s!"on_{str}"
+  let prop := mkIdent s!"prop_{str}_start_pos"
+  let start ← `(cExpr| lean_unsigned_to_nat((uint64_t)data->$(mkIdent s!"prop_{str}_start_pos")-(uint64_t)str));
+  let close ← `(cExpr| lean_unsigned_to_nat(size));
+  let code := (← `(cStmt| lean_apply_3(data->callbacks.$name, $start, $close, data->data)))
+  `(cStmtLike|
+    if (data->$prop != NULL) {
+      $code
+    }
+  )
+
+def compile (name: Ident) (machine: Machine) : CommandElabM Unit := do
+
+  let params ← machine.storage.callback.mapM (λ(x, isSpan) => do
+    let typ ← if isSpan then `(Nat → Nat → α → α) else `(α → α)
+    `(Lean.Parser.Term.bracketedBinderF | ($(mkIdent s!"on_{x}") : $typ)))
+  let assign ← machine.storage.callback.mapM (λ(x, _) => `(cStmtLike | data->callbacks.$(mkIdent s!"on_{x}"):ident = $(mkIdent s!"on_{x}");))
+
+  let names := spanProps machine.storage
+  let resetSpans ← names.mapM resetSpan
+  let callSpans ← names.mapM callSpan
+
+  let getters ← (machine.storage.props.filter (λ(_, typ) =>
+                  match typ with
+                  | .span => false
+                  | _ => true)).mapM (getter ∘ Prod.fst)
+
+  let data :=  mkIdent "Data"
+
+  elabCommand =<< `(
     namespace $name
       alloy c include "lean/lean.h" "stdlib.h" "stdio.h"
 
@@ -254,7 +339,8 @@ def compile (name: Ident) (machine: Machine) : CommandElabM (TSyntax `command) :
         #define FAIL 0
         #define PAUSED 1
         #define SUCCEEDED 2
-        #define span_t char*
+
+        typedef const char* span_t;
 
         $(← enumStates machine)
         $(← callbacksStruct machine.storage)
@@ -264,24 +350,45 @@ def compile (name: Ident) (machine: Machine) : CommandElabM (TSyntax `command) :
         $(← alloyParse (mkIdent "alloy_parse") (← compileBranch machine))
       end
 
-      alloy c opaque_extern_type Data => data_t where
+      alloy c opaque_extern_type $(mkIdent "Data") (α: Type) => data_t where
+        foreach(s, f) := lean_apply_1(f, s->m_s)
         finalize(s) := lean_dec(s->m_s); free(s)
 
       alloy c extern
-      def $(mkIdent "create") (unit: Unit) : Data := {
-        data_t* data = calloc(sizeof(data_t), 0);
-        return to_lean<Data>(data);
+      def $(mkIdent "create") {α: Type} (info: α) $params* : $(mkIdent "Data") α := {
+        data_t* data = calloc(1, sizeof(data_t));
+        data->data = info;
+
+        {$assign*}
+
+        return to_lean<$data>(data);
       }
 
       alloy c extern
-      def $(mkIdent "parse") (data_obj: @&Data) (s: String) (size: UInt32) : UInt32 := {
+      def $(mkIdent "parse") {α: Type} (data_obj: @& $(mkIdent "Data") α) (s: String) (size: UInt32) : UInt32 := {
         const char* str = lean_string_cstr(s);
         const char* strend = str + size;
+
         data_t* data = lean_get_external_data(data_obj);
+        data->string = str;
+
+        { $resetSpans* }
+
         int res = alloy_parse(data->state, data, str, strend);
         data->state = res;
 
+        { $callSpans* }
+
         return res;
       }
-    end $name
+
+      alloy c extern
+      def $(mkIdent $ Name.mkStr2 "Data" "reset") {α: Type} (data_obj: @& $(mkIdent "Data") α) : $(mkIdent "Data") α := {
+        data_t* data = lean_get_external_data(data_obj);
+        data->state = 0;
+        return data_obj;
+      }
   )
+
+  for getter in getters do
+    elabCommand getter

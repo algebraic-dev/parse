@@ -22,19 +22,26 @@ declare_syntax_cat parsers
 declare_syntax_cat clause
 declare_syntax_cat action
 declare_syntax_cat node
+declare_syntax_cat code
 declare_syntax_cat typ
 
 syntax "u8" : typ
 syntax "u16" : typ
 syntax "u32" : typ
+syntax "u64" : typ
 syntax &"char" : typ
 syntax "span" : typ
 
-syntax (name := actionCallback) "(" "call" term "then" ident ")" : action
-syntax (name := actionStore) "(" "store" ident ident ")" : action
-syntax (name := actionStart) "(" "start" ident ident ")" : action
-syntax (name := actionEnd) "(" "end" ident ident ")" : action
-syntax (name := actionError) "(" "error" term ")" : action
+syntax (name := callCode) "(" &"mulAdd" ident ")" : code
+syntax (name := callLoad) "(" &"loadNum" ident ")" : code
+syntax (name := callIdent) ident : code
+
+syntax (name := actionCallback) "(" &"call" code ident ")" : action
+syntax (name := actionStore) "(" &"store" ident ident ")" : action
+syntax (name := actionStart) "(" &"start" ident ident ")" : action
+syntax (name := actionEnd) "(" &"end" ident ident ")" : action
+syntax (name := actionConsume) "(" &"consume" ident ident ")" : action
+syntax (name := actionError) "(" &"error" term ")" : action
 syntax (name := actionNode) ident : action
 
 syntax (name := switchClause) "|" str "=>" term : clause
@@ -73,6 +80,7 @@ def parseTyp : TSyntax `typ -> CommandElabM Typ
   | `(typ| u8) => pure Typ.u8
   | `(typ| u16) => pure Typ.u16
   | `(typ| u32) => pure Typ.u32
+  | `(typ| u64) => pure Typ.u64
   | `(typ| span) => pure Typ.span
   | syn => do
       Lean.logInfo syn
@@ -83,12 +91,25 @@ def parseSwitchClause (syn: TSyntax `clause) : CommandElabM (String × Nat) :=
   | `(switchClause | | $str:str => $num:num) => return (str.getString, num.getNat)
   | syn => Lean.throwErrorAt syn "unsupported syntax"
 
+def parseCode (names: Names) (syn: Syntax) : CommandElabM Call :=
+  match syn with
+  | `(callCode| (mulAdd $callback:ident)) => do
+    let property ← ensure syn callback.getId.toString names.properties.find?
+    return (Call.mulAdd property)
+  | `(callLoad| (loadNum $callback:ident)) => do
+    let property ← ensure syn callback.getId.toString names.properties.find?
+    return (Call.loadNum property)
+  | `(callIdent| $callback:ident) => do
+    let callback ← ensure syn callback.getId.toString names.callback.find?
+    return (Call.arbitrary callback)
+  | syn => Lean.throwErrorAt syn "unsupported syntax"
+
 def parseAction (names: Names) (syn: Syntax) : CommandElabM Action :=
   match syn with
-  | `(actionCallback | (call $callback:ident then $to:ident)) => do
-    let callback ← ensure syn callback.getId.toString names.callback.find?
+  | `(actionCallback | (call $code:code $to:ident)) => do
+    let code ← parseCode names code
     let to ← ensure syn to.getId.toString names.nodes.find?
-    pure (Action.call callback to)
+    pure (Action.call code to)
   | `(actionStore | (store $property:ident $to:ident)) => do
     let property ← ensure syn property.getId.toString names.properties.find?
     let to ← ensure syn to.getId.toString names.nodes.find?
@@ -104,6 +125,10 @@ def parseAction (names: Names) (syn: Syntax) : CommandElabM Action :=
   | `(actionNode | $to:ident) => do
     let to ← ensure syn to.getId.toString names.nodes.find?
     pure (Action.goto to)
+  | `(actionConsume | (consume $prop:ident $to:ident)) => do
+    let property ← ensure syn prop.getId.toString names.properties.find?
+    let to ← ensure syn to.getId.toString names.nodes.find?
+    pure (Action.consume property to)
   | `(actionError | (error $num:num)) =>
     pure (Action.error num.getNat)
   | syn => Lean.throwErrorAt syn "unsupported syntax"
@@ -180,6 +205,4 @@ elab "parser " name:ident "where" synProps:propertyDef* synCalls:callbackDef* sy
   let grammar := Grammar.mk storage nodes
   let machine := Parse.Lowering.translate grammar
 
-  let res ← Parse.Compile.C.compile name machine
-
-  elabCommand res
+  Parse.Compile.C.compile name machine
