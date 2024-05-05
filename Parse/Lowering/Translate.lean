@@ -119,7 +119,6 @@ def compileAction (jump: Nat) (capture: Bool) (data: Option Nat) (action: Syntax
   let jump := if capture then Nat.max 1 jump else jump
   match action with
   | .call prop to => Instruction.call prop (gotoNext jump to)
-  | .store Capture.begin prop to => Instruction.capture prop (gotoNext jump to)
   | .store Capture.data prop to => Instruction.store prop data (gotoNext jump to)
   | action =>
     let inst := compileAction' data action
