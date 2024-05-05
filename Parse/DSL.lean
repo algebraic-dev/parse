@@ -37,6 +37,7 @@ syntax ":" &"span" : typ
 syntax (name := callCode) "(" &"mulAdd" ident ")" : code
 syntax (name := callLoad) "(" &"loadNum" ident ")" : code
 syntax (name := callStore) "(" &"callStore" ident ident ")" : code
+syntax (name := callStoreNum) "(" &"store" ident num ")" : code
 syntax (name := callIdent) ident : code
 
 syntax (name := actionCallback) "call" code ident : action
@@ -115,6 +116,9 @@ def parseCode (names: Names) (syn: Syntax) : CommandElabM Call :=
     let callback ← ensure syn callback.getId.toString names.callback.find?
     let property ← ensure syn prop.getId.toString names.properties.find?
     return (Call.callStore property callback)
+  | `(callStoreNum| (store $property:ident $num:num)) => do
+    let property ← ensure syn property.getId.toString names.properties.find?
+    return (Call.store property num.getNat)
   | `(callIdent| $callback:ident) => do
     let callback ← ensure syn callback.getId.toString names.callback.find?
     return (Call.arbitrary callback)

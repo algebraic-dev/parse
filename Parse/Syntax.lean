@@ -18,6 +18,7 @@ inductive Call where
   | mulAdd (prop: Nat)
   | loadNum (prop: Nat)
   | callStore (prop: Nat) (call: Nat)
+  | store (prop: Nat) (num: Nat)
   deriving Inhabited, Hashable, Repr
 
 /-- Action that happens after something is matched with a matcher -/

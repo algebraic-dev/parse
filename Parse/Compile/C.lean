@@ -120,6 +120,10 @@ mutual
       return code.append alts
 
   partial def compileCode (code: Code) : Call → CompileM Code
+    | .store method n => do
+      let names ← CompileM.get CompileState.names
+      let name := mkIdent s!"prop_{names[method]!}"
+      return  code.push (← `(cStmt| data->$name = $(mkNumLit n);))
     | .arbitrary n => do
       let names ← CompileM.get CompileState.calls
       let name := mkIdent s!"on_{names[n]!}"
