@@ -16,6 +16,10 @@ structure Prefix where
   capture : Bool
   deriving Repr, Hashable, BEq, Inhabited
 
+inductive Action where
+  | single (act: Syntax.Action)
+  | select (call: Syntax.Call) (acts: Array (Nat × Syntax.Action))
+
 /-- Subject is the string to test -/
 def Subject := Substring
   deriving BEq, Repr
@@ -52,12 +56,14 @@ def Case.specialize (case: Case α) (pref: Prefix) : Option (Case α) :=
 def Case.length (case: Case α) := case.subject.bsize
 
 /-- Creates a case from a matcher and action -/
-def Case.ofMatcher (action: Parse.Syntax.Action) : Parse.Syntax.Matcher → Array (Case Parse.Syntax.Action)
-  | .is strs =>
-      strs.map ({subject := ·.toSubstring, capture := true, store := none, action })
-  | .peek chars =>
-      chars.map ({subject := ·.toString.toSubstring, capture := false, store := none, action })
-  | .select cases =>
-      cases.map (λ(str, data) => {subject := str.toSubstring, capture := true, store := some data, action })
-  | .goto capture =>
-      #[{subject := "".toSubstring, capture, store := none, action }]
+def Case.ofMatcher : Parse.Syntax.Case → Array (Case Action)
+  | .is strs action =>
+      strs.map ({subject := ·.toSubstring, capture := true, store := none, action := Action.single action })
+  | .peek chars action =>
+      chars.map ({subject := ·.toString.toSubstring, capture := false, store := none, action := Action.single action })
+  | .switch cases action=>
+      cases.map (λ(str, data) => {subject := str.toSubstring, capture := true, store := some data, action := Action.single action })
+  | .goto capture action =>
+      #[{subject := "".toSubstring, capture, store := none, action := Action.single action }]
+  | .select inv actions =>
+      #[{subject := "".toSubstring, capture := false, store := none, action := Action.select inv actions }]

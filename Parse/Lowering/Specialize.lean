@@ -63,7 +63,7 @@ def Problem.solve' (problem: Problem Action) : Nat → Tree Action
     if let some res := problem.getDone then
       Tree.done (Step.mk res.store res.capture res.action)
     else
-      let otherwise := Step.ofCase $ problem.findDone (Action.error 0)
+      let otherwise := Step.ofCase $ problem.findDone (.single (Action.error 1))
       let (problem₂, acc) := Problem.accumulate problem "" n
 
       -- We don't remove the fuel that is used on the accumulate, it's bad :S

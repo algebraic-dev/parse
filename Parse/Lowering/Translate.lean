@@ -45,6 +45,7 @@ inductive Consumer (inst: Type) where
 
 inductive Instruction : Bool → Type where
   | consumer (consumer: Consumer (Instruction false)) : Instruction true
+  | select (code: Call) (alts: Array (Nat × (Instruction false))) : Instruction α
   | next (chars: Nat) (next: Instruction α) : Instruction α
   | store (prop: Nat) (data: Option Nat) (next: Instruction α) : Instruction α
   | capture (prop: Nat) (next: Instruction α) : Instruction α
@@ -101,7 +102,7 @@ def CompileM.run (monad: CompileM α) : Machine :=
 
 -- Compile
 
-def compileAction' (data: Option Nat) : Action → Instruction α
+def compileAction' (data: Option Nat) : Syntax.Action → Instruction α
   | .store Capture.data prop to => Instruction.store prop data (Instruction.goto to)
   | .store Capture.begin prop to => Instruction.capture prop (Instruction.goto to)
   | .store Capture.close prop to => Instruction.close prop (Instruction.goto to)
@@ -114,15 +115,22 @@ def gotoNext (jump: Nat) (to: Nat) : Instruction α :=
   if jump != 0 then (Instruction.next jump (Instruction.goto to)) else Instruction.goto to
 
 -- The capture begin always start before the next instruction
-def compileAction (jump: Nat) (step: Step Action) : Instruction α :=
-  let jump := if step.capture then Nat.max 1 jump else jump
-  match step.next with
+def compileAction (jump: Nat) (capture: Bool) (data: Option Nat) (action: Syntax.Action) : Instruction α :=
+  let jump := if capture then Nat.max 1 jump else jump
+  match action with
   | .call prop to => Instruction.call prop (gotoNext jump to)
   | .store Capture.begin prop to => Instruction.capture prop (gotoNext jump to)
-  | .store Capture.data prop to => Instruction.store prop step.data (gotoNext jump to)
+  | .store Capture.data prop to => Instruction.store prop data (gotoNext jump to)
   | action =>
-    let inst := compileAction' step.data action
+    let inst := compileAction' data action
     if jump != 0 then Instruction.next jump inst else inst
+
+def compileStep (jump: Nat) (step: Step Specialize.Action) : Instruction α :=
+  match step.next with
+  | .single action => compileAction jump step.capture step.data action
+  | .select call actions =>
+    let actions := actions.map (λ(alt, action) => (alt, compileAction jump step.capture step.data action))
+    Instruction.select call actions
 
 def groupActions (alts: Array (Char × UInt64 × Instruction false)) : Array (Check × Instruction false) :=
   let alts := alts.groupByKey (·.snd.fst)
@@ -154,12 +162,11 @@ def actionsToConsumer (alts: Array (Check × Instruction false)) (otherwise: Ins
     else
       Consumer.mixed alts otherwise
 
-partial def compileTree (jump: Nat) (b: Bool) : Tree Action → CompileM (Instruction b)
+partial def compileTree (jump: Nat) (b: Bool) : Tree Specialize.Action → CompileM (Instruction b)
   | .fail => return Instruction.error 0
-  | .done step => return compileAction jump step
+  | .done step => return compileStep jump step
   | .branch branches default => do
-    let otherwise := compileAction jump (α := false) default
-
+    let otherwise := compileStep jump (α := false) default
     let result ←
       match branches with
       | .string branch =>

@@ -17,6 +17,7 @@ inductive Call where
   | arbitrary (name: Nat)
   | mulAdd (prop: Nat)
   | loadNum (prop: Nat)
+  | callStore (prop: Nat) (call: Nat)
   deriving Inhabited, Hashable, Repr
 
 /-- Action that happens after something is matched with a matcher -/
@@ -29,17 +30,12 @@ inductive Action
   deriving Inhabited, Hashable, Repr
 
 /-- An alternative for matching strings -/
-inductive Matcher
-  | is (matchers: Array String)
-  | peek (matchers: Array Char)
-  | select (matchers: Array (String × Nat))
-  | goto (consume: Bool)
-  deriving Inhabited
-
-/-- A matcher for a string and the consequence of matching it -/
-structure Case where
-  matcher : Matcher
-  action : Action
+inductive Case
+  | is (matchers: Array String) (action : Action)
+  | peek (matchers: Array Char) (action : Action)
+  | switch (matchers: Array (String × Nat)) (action : Action)
+  | select (callback: Call) (matchers: Array (Nat × Action))
+  | goto (consume: Bool) (action : Action)
   deriving Inhabited
 
 /-- Node is some state with a bunch of matchers that can change the state and perform some actions -/

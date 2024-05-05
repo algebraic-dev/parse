@@ -45,5 +45,5 @@ def Problem.stepsNum (problem: Problem α) : Nat
   |> (· + 1)
 
 /-- Creates a problem out of cases -/
-def Problem.ofCases (case: Array Parse.Syntax.Case) : Array (Case Parse.Syntax.Action) :=
-  case.concatMap (λcase => Case.ofMatcher case.action case.matcher)
+def Problem.ofCases (case: Array Parse.Syntax.Case) : Array (Case Action) :=
+  case.concatMap Case.ofMatcher

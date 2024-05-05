@@ -66,6 +66,8 @@ def genCheck (code: Code) : CompileM Code := do
   let state := genParseIdent "state" cur
   return code.push (← `(cStmt| if (p == endp) return $state;))
 
+def errInst : Instruction false := .error 0
+
 mutual
   partial def ifStmt (code: Code) (comparison: TSyntax `cExpr) (ok: Instruction false) (otherwise: Instruction false) : CompileM Code := do
     let ok ← compileInstruction #[] ok
@@ -121,7 +123,10 @@ mutual
     | .arbitrary n => do
       let names ← CompileM.get CompileState.calls
       let name := mkIdent s!"on_{names[n]!}"
-      return code.push (← `(cStmt| lean_apply_1(data->callbacks.$name, data->data)))
+      let code := code.push (← `(cStmt| lean_apply_1(data->callbacks.$name, data->data)))
+      let code := code.push (← `(cStmtLike| lean_object* info = lean_ctor_get(obj, 0);))
+      let code := code.push (← `(cStmtLike| lean_object* code = lean_ctor_get(obj, 1);))
+      return code.push (← `(cStmtLike| data->data = info;))
     | .loadNum n => do
       let names ← CompileM.get CompileState.names
       let name := mkIdent s!"prop_{names[n]!}"
@@ -130,12 +135,30 @@ mutual
       let names ← CompileM.get CompileState.names
       let name := mkIdent s!"prop_{names[n]!}"
       let code := code.push (← `(cStmt| data->$name *= 10;))
-      return  code.push (← `(cStmt| data->$name += *p - '0';))
+      return code.push (← `(cStmt| data->$name += *p - '0';))
+    | .callStore prop call => do
+      let names ← CompileM.get CompileState.calls
+      let name := mkIdent s!"on_{names[call]!}"
+      let code := code.push (← `(cStmtLike| lean_object* obj = lean_apply_1(data->callbacks.$name, data->data);))
+      let code := code.push (← `(cStmtLike| lean_object* info = lean_ctor_get(obj, 0);))
+      let code := code.push (← `(cStmtLike| lean_object* code = lean_ctor_get(obj, 1);))
+      let code := code.push (← `(cStmtLike| data->data = info;))
+      let names ← CompileM.get CompileState.names
+      let name := mkIdent s!"prop_{names[prop]!}"
+      return code.push (← `(cStmt| data->$name = lean_unbox(code);))
 
   partial def compileInstruction (code: Code) : Instruction β → CompileM Code
     | .next num next => do
       let code := code.push (← `(cStmt| p += $(mkNumLit num);))
       compileInstruction code next
+    | .select call alts => do
+      let code ← compileCode code call
+      let otherwise ← compileInstruction #[] errInst
+      let alts ← alts.mapM $ λ(case, to) => do
+        let next ← compileInstruction #[] to
+        `(cStmt| case $(mkNumLit case):constExpr : { $next* })
+      let alts := alts.push (← `(cStmt| default : { $otherwise* }))
+      return code.push (← `(cStmt| switch (code) { $alts* }))
     | .store prop data next => do
       let names ← CompileM.get CompileState.names
       let prop := mkIdent s!"prop_{names.get! prop}"
@@ -162,7 +185,10 @@ mutual
       let close ← `(cExpr| lean_unsigned_to_nat((uint64_t)p - (uint64_t)data->string));
       let code := code.push (← `(cStmtLike| int start = (uint64_t)data->$(mkIdent s!"prop_{names[prop]!}_start_pos")-(uint64_t)data->string;))
       let code := code.push (← `(cStmtLike| data->$(mkIdent s!"prop_{names[prop]!}_start_pos") = NULL;))
-      let code := code.push (← `(cStmtLike| lean_apply_3(data->callbacks.$name, $start, $close, data->data)))
+      let code := code.push (← `(cStmtLike| lean_object* obj = lean_apply_3(data->callbacks.$name, $start, $close, data->data)))
+      let code := code.push (← `(cStmtLike| lean_object* info = lean_ctor_get(obj, 0);))
+      let code := code.push (← `(cStmtLike| lean_object* code = lean_ctor_get(obj, 1);))
+      let code := code.push (← `(cStmtLike| data->data = info;))
       compileInstruction code next
     | .goto to => do
       let state := genParseIdent "state" to
@@ -171,7 +197,8 @@ mutual
       let code ← compileCode code call
       compileInstruction code next
     | .error errCode => do
-      return code.push (← `(cStmt| return -$(mkNumLit (errCode + 1));))
+      let code := code.push (← `(cStmt| data->error = $(mkNumLit errCode)))
+      return code.push (← `(cStmt| return -$(mkNumLit errCode);))
     | .consumer consumer =>
       compileConsumer code consumer
 end
@@ -235,6 +262,7 @@ def dataStruct (storage: Storage) : CommandElabM (TSyntax `cCmd) := do
       callbacks_t callbacks;
 
       uint64_t str_ptr;
+      uint64_t error;
       uint64_t state;
       uint8_t pointer;
 
@@ -306,17 +334,20 @@ def callSpan (str: String) : CommandElabM (TSyntax `cStmtLike) := do
   let prop := mkIdent s!"prop_{str}_start_pos"
   let start ← `(cExpr| lean_unsigned_to_nat((uint64_t)data->$(mkIdent s!"prop_{str}_start_pos")-(uint64_t)str));
   let close ← `(cExpr| lean_unsigned_to_nat(size));
-  let code := (← `(cStmt| lean_apply_3(data->callbacks.$name, $start, $close, data->data)))
+  let code := (← `(cStmtLike| lean_object* obj = lean_apply_3(data->callbacks.$name, $start, $close, data->data)))
   `(cStmtLike|
     if (data->$prop != NULL) {
       $code
+      lean_object* info = lean_ctor_get(obj, 0);
+      lean_object* code = lean_ctor_get(obj, 1);
+      data->data = info;
     }
   )
 
 def compile (name: Ident) (machine: Machine) : CommandElabM Unit := do
 
   let params ← machine.storage.callback.mapM (λ(x, isSpan) => do
-    let typ ← if isSpan then `(Nat → Nat → α → α) else `(α → α)
+    let typ ← if isSpan then `(Nat → Nat → α → (α × Int)) else `(α → (α × Int))
     `(Lean.Parser.Term.bracketedBinderF | ($(mkIdent s!"on_{x}") : $typ)))
   let assign ← machine.storage.callback.mapM (λ(x, _) => `(cStmtLike | data->callbacks.$(mkIdent s!"on_{x}"):ident = $(mkIdent s!"on_{x}");))
 
@@ -356,7 +387,7 @@ def compile (name: Ident) (machine: Machine) : CommandElabM Unit := do
 
       alloy c extern
       def $(mkIdent "create") {α: Type} (info: α) $params* : $(mkIdent "Data") α := {
-        data_t* data = calloc(1, sizeof(data_t));
+        data_t* data = (data_t*)calloc(1, sizeof(data_t));
         data->data = info;
 
         {$assign*}
@@ -387,6 +418,12 @@ def compile (name: Ident) (machine: Machine) : CommandElabM Unit := do
         data_t* data = lean_get_external_data(data_obj);
         data->state = 0;
         return data_obj;
+      }
+
+      alloy c extern
+      def $(mkIdent $ Name.mkStr2 "Data" "error") {α: Type} (data_obj: @& $(mkIdent "Data") α) : UInt64 := {
+        data_t* data = lean_get_external_data(data_obj);
+        return data->error;
       }
   )
 
