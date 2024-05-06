@@ -197,7 +197,7 @@ mutual
       let close ← `(cExpr| lean_unsigned_to_nat((uint64_t)p - (uint64_t)data->string));
       let code := code.push (← `(cStmtLike| int start = (uint64_t)data->$(newIdent s!"prop_{names[prop]!}_start_pos")-(uint64_t)data->string;))
       let code := code.push (← `(cStmtLike| data->$(newIdent s!"prop_{names[prop]!}_start_pos") = NULL;))
-      let code := code.push (← `(cStmtLike| lean_object* obj = lean_apply_3(data->callbacks.$name, $start, $close, data->data)))
+      let code := code.push (← `(cStmtLike| lean_object* obj = lean_apply_4(data->callbacks.$name, $start, $close, data->str, data->data)))
       let code := code.push (← `(cStmtLike| lean_object* info = lean_ctor_get(obj, 0);))
       let code := code.push (← `(cStmtLike| lean_object* code = lean_ctor_get(obj, 1);))
       let code := code.push (← `(cStmtLike| data->data = info;))
@@ -269,6 +269,7 @@ def dataStruct (storage: Storage) : CommandElabM (TSyntax `cCmd) := do
   `(cCmd|
     typedef struct data_t {
       lean_object* data;
+      lean_object* str;
 
       const char* string;
       callbacks_t callbacks;
@@ -346,7 +347,7 @@ def callSpan (str: String) : CommandElabM (TSyntax `cStmtLike) := do
   let prop := newIdent s!"prop_{str}_start_pos"
   let start ← `(cExpr| lean_unsigned_to_nat((uint64_t)data->$(newIdent s!"prop_{str}_start_pos")-(uint64_t)str));
   let close ← `(cExpr| lean_unsigned_to_nat(size));
-  let code := (← `(cStmtLike| lean_object* obj = lean_apply_3(data->callbacks.$name, $start, $close, data->data)))
+  let code := (← `(cStmtLike| lean_object* obj = lean_apply_4(data->callbacks.$name, $start, $close, data->str, data->data)))
   `(cStmtLike|
     if (data->$prop != NULL) {
       $code
@@ -359,7 +360,7 @@ def callSpan (str: String) : CommandElabM (TSyntax `cStmtLike) := do
 def compile (name: Ident) (machine: Machine) : CommandElabM Unit := do
 
   let params ← machine.storage.callback.mapM (λ(x, isSpan) => do
-    let typ ← if isSpan then `(Nat → Nat → α → (α × Int)) else `(α → (α × Int))
+    let typ ← if isSpan then `(Nat → Nat → String → α → (α × Int)) else `(α → (α × Int))
     `(Lean.Parser.Term.bracketedBinderF | ($(newIdent s!"on_{x}") : $typ)))
   let assign ← machine.storage.callback.mapM (λ(x, _) => `(cStmtLike | data->callbacks.$(newIdent s!"on_{x}"):ident = $(newIdent s!"on_{x}");))
 
@@ -414,6 +415,7 @@ def compile (name: Ident) (machine: Machine) : CommandElabM Unit := do
 
         data_t* data = lean_get_external_data(data_obj);
         data->string = str;
+        data->str = s;
 
         { $resetSpans* }
 
