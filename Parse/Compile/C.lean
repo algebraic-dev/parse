@@ -28,6 +28,11 @@ structure CompileState where
   maps: HashMap Interval Nat
   deriving Inhabited
 
+def mangledName (name: String) : CommandElabM Ident := do
+  let cur ← getCurrNamespace
+  let name := Name.str cur name
+  pure $ mkIdent $ Name.mkStr1 s!"{name.mangle}"
+
 abbrev CompileM := StateT CompileState CommandElabM
 
 def CompileM.get (f: CompileState -> α) : CompileM α :=
@@ -38,12 +43,13 @@ def CompileM.modify (f: CompileState -> CompileState) : CompileM Unit :=
 
 def CompileM.getInterval (int: Interval) : CompileM Ident := do
   let maps ← CompileM.get CompileState.maps
+  let gen x := mangledName (genParseIdent "bitmap" x).getId.toString
   if let some res := maps.find? int then
-    pure $ genParseIdent "bitmap" res
+    gen res
   else do
     let size := maps.size
     CompileM.modify (λstate => { state with maps := state.maps.insert int state.maps.size })
-    pure $ genParseIdent "bitmap" size
+    gen size
 
 def CompileM.run (c: CompileM α) : CommandElabM α :=
   Prod.fst <$> StateT.run c Inhabited.default
@@ -79,17 +85,18 @@ mutual
 
   partial def compileConsumer (code: Code) : Consumer (Instruction false) → CompileM Code
     | .is str ok otherwise => do
+      let match_string ← mangledName "match_string"
       let cur ← CompileM.get CompileState.state
-        let n := mkNumLit (str.toSubstring.bsize)
-        let str := TSyntax.mk $ Syntax.mkStrLit str
-        let code := code.push (← `(cStmtLike| int result = match_string(data, $str, $n, $pointerName, $endPointerName);))
-        let state := genParseIdent "state" cur
-        let then_ ← compileInstruction #[] ok
-        let otherwise ← compileInstruction #[] otherwise
-        return code.push (← `(cStmt| switch (result) {
-          case PAUSED: return $state;
-          case FAIL: { $otherwise* }
-          case SUCCEEDED: { $then_* }
+      let n := mkNumLit (str.toSubstring.bsize)
+      let str := TSyntax.mk $ Syntax.mkStrLit str
+      let code := code.push (← `(cStmtLike| int result = $match_string:ident(data, $str, $n, $pointerName, $endPointerName);))
+      let state := genParseIdent "state" cur
+      let then_ ← compileInstruction #[] ok
+      let otherwise ← compileInstruction #[] otherwise
+      return code.push (← `(cStmt| switch (result) {
+        case PAUSED: return $state;
+        case FAIL: { $otherwise* }
+        case SUCCEEDED: { $then_* }
         }))
     | .char chr ok otherwise => do
       let code ← genCheck code
@@ -233,7 +240,7 @@ def enumStates (machine: Machine) : CommandElabM (TSyntax `cCmd) := do
   let states ← machine.nodes.mapIdxM (λi _ => `(Alloy.C.enumerator| $(genParseIdent "state" i)))
   let states := withComma states
   `(cCmd|
-    enum state_e {
+    enum $(← mangledName "states") {
       $states,*
     };
   )
@@ -243,19 +250,22 @@ def callbacksStruct (storage: Storage) : CommandElabM (TSyntax `cCmd) := do
     let name := mkIdent $ Name.mkStr1 s!"on_{name}"
     `(Alloy.C.aggrDeclaration| lean_object *$name:ident )
 
+  let callbacks_t ← mangledName "callbacks_t"
+
   `(cCmd|
-    typedef struct callbacks {
+    typedef struct $callbacks_t {
       $fields*
-    } callbacks_t;
+    } $callbacks_t;
   )
 
 def getter (field: String) : CommandElabM (TSyntax `command) := do
   let prop := mkIdent (Name.mkStr2 "Data" field)
   let propName := newIdent s!"prop_{field}"
+  let data_t ← mangledName "data_t"
   `(command |
     alloy c extern
       def $prop {α: Type} (data_obj: $(newIdent "Data") α) : UInt64 := {
-        data_t* data = lean_get_external_data(data_obj);
+        $data_t:ident* data = lean_get_external_data(data_obj);
         return data->$propName;
       }
   )
@@ -266,13 +276,16 @@ def dataStruct (storage: Storage) : CommandElabM (TSyntax `cCmd) := do
     let ident := compilePropName name typ
     `(Alloy.C.aggrDeclaration| $typName $ident; )
 
+  let data_t ← mangledName "data_t"
+  let callbacks_t ← mangledName "callbacks_t"
+
   `(cCmd|
-    typedef struct data_t {
+    typedef struct $data_t:ident {
       lean_object* data;
       lean_object* str;
 
       const char* string;
-      callbacks_t callbacks;
+      $callbacks_t callbacks;
 
       uint64_t str_ptr;
       uint64_t error;
@@ -280,12 +293,14 @@ def dataStruct (storage: Storage) : CommandElabM (TSyntax `cCmd) := do
       uint8_t pointer;
 
       $fields*
-    } data_t;
+    } $data_t:ident;
   )
 
 def matchStr : CommandElabM (TSyntax `cCmd) := do
+  let data_t ← mangledName "data_t"
+  let match_string ← mangledName "match_string"
   `(cCmd|
-    uint32_t match_string(data_t *data, char* s, int len, const char* p, const char* endp) {
+    uint32_t $match_string:ident($data_t:ident *data, char* s, int len, const char* p, const char* endp) {
       p += data->pointer;
       for(; p != endp; p++) {
         if (data->pointer == len-1) {
@@ -302,8 +317,9 @@ def matchStr : CommandElabM (TSyntax `cCmd) := do
   )
 
 def alloyParse (name: Ident) (branches: Array (TSyntax `cStmtLike)) : CommandElabM (TSyntax `cCmd) := do
+  let data_t ← mangledName "data_t"
   `(cCmd|
-    uint32_t $name:ident (uint32_t state, data_t *data, const char* p, const char* endp) {
+    uint32_t $name:ident (uint32_t state, $data_t:ident * data, const char* p, const char* endp) {
       switch (state) {
         $branches*
         default:
@@ -359,7 +375,6 @@ def callSpan (str: String) : CommandElabM (TSyntax `cStmtLike) := do
     }
   )
 
-
 def genBitMap (name: Ident) (int: Interval) : CommandElabM (TSyntax `Alloy.C.declaration) := do
   let mut alts := #[]
 
@@ -376,7 +391,8 @@ def bitMaps (maps: HashMap Interval Nat) : CommandElabM (Array (TSyntax  `Alloy.
   let mut result := #[]
 
   for (int, index) in maps.toArray do
-    result := result.push (← genBitMap (genParseIdent "bitmap" index) int)
+    let bitmap ← mangledName (genParseIdent "bitmap" index).getId.toString
+    result := result.push (← genBitMap bitmap int)
 
   return result
 
@@ -400,9 +416,17 @@ def compile (name: Ident) (machine: Machine) : CommandElabM Unit := do
 
   let (branches, maps) ← compileBranch machine
 
+  let data_t ← mangledName "data_t"
+  let alloy_parse ← mangledName "alloy_parse"
+
+  let fields := machine.storage.callback.map $ λ(name, _) => mkIdent $ Name.mkStr1 s!"on_{name}"
+  let applies ← fields.mapM $ λname => `(cStmtLike| lean_apply_1(f, s->callbacks.$name))
+  let finalizers ← fields.mapM $ λname => `(cStmtLike| lean_dec(s->callbacks.$name))
+  let incs ← fields.mapM $ λname => `(cStmtLike| lean_inc(new_data->callbacks.$name))
+
   elabCommand =<< `(
     namespace $name
-      alloy c include "lean/lean.h" "stdlib.h" "stdio.h"
+      alloy c include "lean/lean.h" "stdlib.h" "stdio.h" "string.h"
 
       alloy c section
         #define FAIL 0
@@ -417,53 +441,96 @@ def compile (name: Ident) (machine: Machine) : CommandElabM Unit := do
         $(← dataStruct machine.storage)
         $(← matchStr)
 
-        $(← alloyParse (newIdent "alloy_parse") branches)
+        $(← alloyParse alloy_parse branches)
       end
 
-      alloy c opaque_extern_type $(newIdent "Data") (α: Type) => data_t where
-        foreach(s, f) := lean_apply_1(f, s->m_s)
-        finalize(s) := lean_dec(s->m_s); free(s)
+      alloy c opaque_extern_type $(newIdent "Data") (α: Type) => $data_t:ident where
+        $(newIdent "foreach")(s, f) := {
+          lean_apply_1(f, s->data);
+          lean_apply_1(f, s->str);
+          {$applies*}
+        }
+        $(newIdent "finalize")(s) := {
+          lean_dec(s->data);
+          lean_dec(s->str);
+          {$finalizers*};
+          free(s);
+        }
+
 
       alloy c extern
       def $(newIdent "create") {α: Type} (info: α) $params* : $(newIdent "Data") α := {
-        data_t* data = (data_t*)calloc(1, sizeof(data_t));
+        $data_t:ident* data = ($data_t:ident*)calloc(1, sizeof($data_t:ident));
         data->data = info;
+        data->str = lean_mk_string_from_bytes("uwu", 3);
 
         {$assign*}
 
-        return to_lean<$data>(data);
+        lean_object* data_obj = to_lean<$data>(data);
+
+        return data_obj;
       }
 
       alloy c extern
-      def $(newIdent "parse") {α: Type} (data_obj: @& $(newIdent "Data") α) (s: String) (size: UInt32) : UInt32 := {
+      def $(newIdent "parse") {α: Type} (data_obj: $(newIdent "Data") α) (s: String) (size: UInt32) : $(newIdent "Data") α := {
+        if (!lean_is_exclusive(data_obj)) {
+          $data_t:ident* new_data = ($data_t:ident*)calloc(1, sizeof($data_t:ident));
+          memcpy(new_data, ($data_t:ident*)lean_get_external_data(data_obj), sizeof($data_t:ident));
+
+          lean_inc(new_data->str);
+          lean_inc(new_data->data);
+
+          { $incs* }
+
+          data_obj = to_lean<$data>(new_data);
+        }
+
+        $data_t:ident* data = lean_get_external_data(data_obj);
+
         const char* str = lean_string_cstr(s);
         const char* strend = str + size;
 
-        data_t* data = lean_get_external_data(data_obj);
         data->string = str;
         data->str = s;
 
         { $resetSpans* }
 
-        int res = alloy_parse(data->state, data, str, strend);
+        int res = $alloy_parse:ident(data->state, data, str, strend);
         data->state = res;
+
+        if (data->error) {
+          return data_obj;
+        }
 
         { $callSpans* }
 
-        return res;
+        return data_obj;
       }
 
       alloy c extern
       def $(mkIdent $ Name.mkStr2 "Data" "reset") {α: Type} (data_obj: @& $(newIdent "Data") α) : $(newIdent "Data") α := {
-        data_t* data = lean_get_external_data(data_obj);
+        $data_t:ident* data = lean_get_external_data(data_obj);
         data->state = 0;
         return data_obj;
       }
 
       alloy c extern
       def $(mkIdent $ Name.mkStr2 "Data" "error") {α: Type} (data_obj: @& $(newIdent "Data") α) : UInt64 := {
-        data_t* data = lean_get_external_data(data_obj);
+        $data_t:ident* data = lean_get_external_data(data_obj);
         return data->error;
+      }
+
+      alloy c extern
+      def $(mkIdent $ Name.mkStr2 "Data" "state") {α: Type} (data_obj: @& $(newIdent "Data") α) : UInt64 := {
+        $data_t:ident* data = lean_get_external_data(data_obj);
+        return data->state;
+      }
+
+      alloy c extern
+      def $(mkIdent $ Name.mkStr2 "Data" "data") {α: Type} [Inhabited α] (data_obj: @& $(newIdent "Data") α) : α := {
+        $data_t:ident* data = lean_get_external_data(data_obj);
+        lean_inc(data->data);
+        return data->data;
       }
   )
 

@@ -23,9 +23,9 @@ inductive Call where
 
 /-- Action that happens after something is matched with a matcher -/
 inductive Action
-  | store (capture: Capture) (property: Nat) (goto: Goto)
-  | consume (property: Nat) (goto: Goto)
-  | call (callback: Call) (goto: Goto)
+  | store (capture: Capture) (property: Nat) (goto: Action)
+  | consume (property: Nat) (goto: Action)
+  | call (callback: Call) (goto: Action)
   | goto (goto: Goto)
   | error (code: Nat)
   deriving Inhabited, Hashable, Repr

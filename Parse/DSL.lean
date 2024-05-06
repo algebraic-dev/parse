@@ -11,6 +11,7 @@ import Parse.Compile.C
   DSL to build a [Parse.Syntax.Grammar] and compile to a module parser inside of the module.
 -/
 
+
 namespace Parse.DSL
 
 open Lean.Elab Command Term Lean Parser Command Std
@@ -40,11 +41,11 @@ syntax (name := callStore) "(" &"callStore" ident ident ")" : code
 syntax (name := callStoreNum) "(" &"store" ident num ")" : code
 syntax (name := callIdent) ident : code
 
-syntax (name := actionCallback) "call" code ident : action
-syntax (name := actionStore) "store" ident ident : action
-syntax (name := actionStart) "start" ident ident : action
-syntax (name := actionEnd) "end" ident ident : action
-syntax (name := actionConsume) "consume" ident ident : action
+syntax (name := actionCallback) "call" code action_enclose: action
+syntax (name := actionStore) "store" ident action_enclose: action
+syntax (name := actionStart) "start" ident action_enclose: action
+syntax (name := actionEnd) "end" ident action_enclose: action
+syntax (name := actionConsume) "consume" ident action_enclose: action
 syntax (name := actionError) "error" term : action
 syntax (name := actionNode) ident : action
 
@@ -125,44 +126,48 @@ def parseCode (names: Names) (syn: Syntax) : CommandElabM Call :=
     return (Call.arbitrary callback)
   | syn => Lean.throwErrorAt syn "unsupported syntax"
 
-def parseAction (names: Names) (syn: TSyntax `action) : CommandElabM Action :=
+mutual
+
+partial def parseAction (names: Names) (syn: TSyntax `action) : CommandElabM Action :=
   match syn with
-  | `(actionCallback | call $code:code $to:ident) => do
+  | `(actionCallback | call $code:code $to) => do
     let code ← parseCode names code
-    let to ← ensure syn to.getId.toString names.nodes.find?
+    let to ← parseEnclose names to
     pure (Action.call code to)
-  | `(actionStore | store $property:ident $to:ident) => do
+  | `(actionStore | store $property:ident $to) => do
     let property ← ensure syn property.getId.toString names.properties.find?
-    let to ← ensure syn to.getId.toString names.nodes.find?
+    let to ← parseEnclose names to
     pure (Action.store Capture.data property to)
-  | `(actionStart | start $property:ident $to:ident) => do
+  | `(actionStart | start $property:ident $to) => do
     let property ← ensure syn property.getId.toString names.properties.find?
-    let to ← ensure syn to.getId.toString names.nodes.find?
+    let to ← parseEnclose names to
     pure (Action.store Capture.begin property to)
-  | `(actionEnd | end $property:ident $to:ident) => do
+  | `(actionEnd | end $property:ident $to) => do
     let property ← ensure syn property.getId.toString names.properties.find?
-    let to ← ensure syn to.getId.toString names.nodes.find?
+    let to ← parseEnclose names to
     pure (Action.store Capture.close property to)
-  | `(actionNode | $to:ident) => do
+  | `(actionNode | $to) => do
     let to ← ensure syn to.getId.toString names.nodes.find?
     pure (Action.goto to)
-  | `(actionConsume | consume $prop:ident $to:ident) => do
+  | `(actionConsume | consume $prop:ident $to) => do
     let property ← ensure syn prop.getId.toString names.properties.find?
-    let to ← ensure syn to.getId.toString names.nodes.find?
+    let to ← parseEnclose names to
     pure (Action.consume property to)
   | `(actionError | error $num:num) =>
     pure (Action.error num.getNat)
   | syn => Lean.throwErrorAt syn "unsupported syntax"
 
-def parseSelectClause (names: Names) (syn: TSyntax `selectClause) : CommandElabM (Nat × Action) :=
-  match syn with
-  | `(selectClause | | $num:num => $action:action) => return (num.getNat, ← parseAction names action)
-  | syn => Lean.throwErrorAt syn "unsupported syntax"
-
-def parseEnclose (names: Names) (syn: TSyntax `action_enclose) : CommandElabM Action :=
+partial def parseEnclose (names: Names) (syn: TSyntax `action_enclose) : CommandElabM Action :=
   match syn with
   | `(actionEnclosePar| ( $action ))
   | `(actionEnclose| $action) => parseAction names action
+  | syn => Lean.throwErrorAt syn "unsupported syntax"
+
+end
+
+def parseSelectClause (names: Names) (syn: TSyntax `selectClause) : CommandElabM (Nat × Action) :=
+  match syn with
+  | `(selectClause | | $num:num => $action:action) => return (num.getNat, ← parseAction names action)
   | syn => Lean.throwErrorAt syn "unsupported syntax"
 
 def parseMatchers (names: Names) (syn: TSyntax `parsers) : CommandElabM Case :=

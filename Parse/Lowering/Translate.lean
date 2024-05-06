@@ -103,23 +103,23 @@ def CompileM.run (monad: CompileM α) : Machine :=
 -- Compile
 
 def compileAction' (data: Option Nat) : Syntax.Action → Instruction α
-  | .store Capture.data prop to => Instruction.store prop data (Instruction.goto to)
-  | .store Capture.begin prop to => Instruction.capture prop (Instruction.goto to)
-  | .store Capture.close prop to => Instruction.close prop (Instruction.goto to)
-  | .consume prop to => Instruction.consume prop (Instruction.goto to)
-  | .call prop to => Instruction.call prop (Instruction.goto to)
+  | .store Capture.data prop to => Instruction.store prop data (compileAction' none to)
+  | .store Capture.begin prop to => Instruction.capture prop (compileAction' none to)
+  | .store Capture.close prop to => Instruction.close prop (compileAction' none to)
+  | .consume prop to => Instruction.consume prop (compileAction' none to)
+  | .call prop to => Instruction.call prop (compileAction' none to)
   | .goto to => Instruction.goto to
   | .error code => Instruction.error code
 
-def gotoNext (jump: Nat) (to: Nat) : Instruction α :=
-  if jump != 0 then (Instruction.next jump (Instruction.goto to)) else Instruction.goto to
+def gotoNext (jump: Nat) (to: Instruction α) : Instruction α :=
+  if jump != 0 then (Instruction.next jump to) else to
 
 -- The capture begin always start before the next instruction
 def compileAction (jump: Nat) (capture: Bool) (data: Option Nat) (action: Syntax.Action) : Instruction α :=
   let jump := if capture then Nat.max 1 jump else jump
   match action with
-  | .call prop to => Instruction.call prop (gotoNext jump to)
-  | .store Capture.data prop to => Instruction.store prop data (gotoNext jump to)
+  | .call prop to => Instruction.call prop (gotoNext jump (compileAction' none to))
+  | .store Capture.data prop to => Instruction.store prop data (gotoNext jump ((compileAction' none to)))
   | action =>
     let inst := compileAction' data action
     if jump != 0 then Instruction.next jump inst else inst
