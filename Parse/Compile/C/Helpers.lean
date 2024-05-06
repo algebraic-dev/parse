@@ -19,9 +19,9 @@ open scoped Alloy.C
 open Lean.Elab Command Term Lean Parser Command Std
 open Parse.Syntax Parse.Lowering
 
-def pointerName := mkIdent "p"
+def pointerName : Ident := mkIdent $ Name.mkStr1 "p"
 
-def endPointerName := mkIdent "endp"
+def endPointerName : Ident := mkIdent $ Name.mkStr1 "endp"
 
 def mkNumLit [ToString α] (x: α) : TSyntax `num :=
   TSyntax.mk (Syntax.mkNumLit (ToString.toString x))
