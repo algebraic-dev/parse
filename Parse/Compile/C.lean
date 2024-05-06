@@ -312,7 +312,7 @@ def alloyParse (name: Ident) (branches: Array (TSyntax `cStmtLike)) : CommandEla
     }
   )
 
-def compileBranch (machine: Machine) : CommandElabM (Array (TSyntax `cStmtLike)) := CompileM.run do
+def compileBranch (machine: Machine) : CommandElabM (Array (TSyntax `cStmtLike) × HashMap Interval Nat) := CompileM.run do
   CompileM.modify (λstate => {state with names := machine.storage.props.map Prod.fst
                                         ,calls := machine.storage.callback.map Prod.fst})
 
@@ -325,7 +325,9 @@ def compileBranch (machine: Machine) : CommandElabM (Array (TSyntax `cStmtLike))
     let alts ← compileInstruction #[] inst.instruction
     branches := branches.push (← `(cStmtLike| case $name:ident: $name:ident: {$alts*}))
 
-  return branches
+  let maps ← CompileState.maps <$> StateT.get
+
+  return (branches, maps)
 
 
 def spanProps (storage: Storage) : Array String :=
@@ -357,6 +359,27 @@ def callSpan (str: String) : CommandElabM (TSyntax `cStmtLike) := do
     }
   )
 
+
+def genBitMap (name: Ident) (int: Interval) : CommandElabM (TSyntax `Alloy.C.declaration) := do
+  let mut alts := #[]
+
+  for i in [0:255] do
+    let int := mkNumLit (if int.in i.toUInt8 then 1 else 0)
+    let lit ← `(Alloy.C.initializerElem | $int)
+    alts := alts.push lit
+
+  let f := withComma alts
+
+  `(Alloy.C.declaration | int $name:ident[255] = {$f,*,})
+
+def bitMaps (maps: HashMap Interval Nat) : CommandElabM (Array (TSyntax  `Alloy.C.declaration)) := do
+  let mut result := #[]
+
+  for (int, index) in maps.toArray do
+    result := result.push (← genBitMap (genParseIdent "bitmap" index) int)
+
+  return result
+
 def compile (name: Ident) (machine: Machine) : CommandElabM Unit := do
 
   let params ← machine.storage.callback.mapM (λ(x, isSpan) => do
@@ -375,6 +398,8 @@ def compile (name: Ident) (machine: Machine) : CommandElabM Unit := do
 
   let data :=  newIdent "Data"
 
+  let (branches, maps) ← compileBranch machine
+
   elabCommand =<< `(
     namespace $name
       alloy c include "lean/lean.h" "stdlib.h" "stdio.h"
@@ -386,12 +411,13 @@ def compile (name: Ident) (machine: Machine) : CommandElabM Unit := do
 
         typedef const char* span_t;
 
+        $(← bitMaps maps)*
         $(← enumStates machine)
         $(← callbacksStruct machine.storage)
         $(← dataStruct machine.storage)
         $(← matchStr)
 
-        $(← alloyParse (newIdent "alloy_parse") (← compileBranch machine))
+        $(← alloyParse (newIdent "alloy_parse") branches)
       end
 
       alloy c opaque_extern_type $(newIdent "Data") (α: Type) => data_t where
