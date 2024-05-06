@@ -55,8 +55,8 @@ syntax (name := switchClause) "|" str "=>" term : clause
 syntax (name := selectClause) "|" num "=>" action : selectClause
 
 syntax (name := switchDef) "switch" action_enclose clause* : parsers
-syntax (name := selectIdentDef) "select" "(" &"read" ident ")" selectClause* : parsers
-syntax (name := selectDef) "select" code selectClause* : parsers
+syntax (name := selectIdentDef) "select" "(" &"read" ident ")" selectClause* &"default" "=>" action : parsers
+syntax (name := selectDef) "select" code selectClause* &"default" "=>" action : parsers
 
 syntax (name := isDef) "is" str action_enclose : parsers
 syntax (name := isIdentDef) "is" ident action_enclose : parsers
@@ -170,14 +170,16 @@ def parseMatchers (names: Names) (syn: TSyntax `parsers) : CommandElabM Case :=
     let arr ← synClauses.sequenceMap parseSwitchClause
     let inv ← parseEnclose names action
     pure (Case.switch arr inv)
-  | `(selectIdentDef | select (read $property:ident) $synClauses*) => do
+  | `(selectIdentDef | select (read $property:ident) $synClauses* default => $act) => do
     let property ← ensure syn property.getId.toString names.properties.find?
+    let default ← parseAction names act
     let arr ← synClauses.sequenceMap (parseSelectClause names)
-    pure (Case.select (MethodOrCall.method property) arr)
-  | `(selectDef | select $caller:code $synClauses*) => do
+    pure (Case.select (MethodOrCall.method property) arr default)
+  | `(selectDef | select $caller:code $synClauses* default => $act) => do
     let inv ← parseCode names caller
+    let default ← parseAction names act
     let arr ← synClauses.sequenceMap (parseSelectClause names)
-    pure (Case.select (MethodOrCall.call inv) arr)
+    pure (Case.select (MethodOrCall.call inv) arr default)
   | `(isDef | is $str:str $inv) => do
     let inv ← parseEnclose names inv
     pure (Case.is #[str.getString] inv)

@@ -18,7 +18,7 @@ structure Prefix where
 
 inductive Action where
   | single (act: Syntax.Action)
-  | select (call: Syntax.MethodOrCall) (acts: Array (Nat × Syntax.Action))
+  | select (call: Syntax.MethodOrCall) (acts: Array (Nat × Syntax.Action)) (otherwise: Syntax.Action)
 
 /-- Subject is the string to test -/
 def Subject := Substring
@@ -65,5 +65,5 @@ def Case.ofMatcher : Parse.Syntax.Case → Array (Case Action)
       cases.map (λ(str, data) => {subject := str.toSubstring, capture := true, store := some data, action := Action.single action })
   | .goto capture action =>
       #[{subject := "".toSubstring, capture, store := none, action := Action.single action }]
-  | .select inv actions =>
-      #[{subject := "".toSubstring, capture := false, store := none, action := Action.select inv actions }]
+  | .select inv actions otherwise =>
+      #[{subject := "".toSubstring, capture := false, store := none, action := Action.select inv actions otherwise }]

@@ -155,7 +155,7 @@ mutual
     | .next num next => do
       let code := code.push (← `(cStmt| p += $(mkNumLit num);))
       compileInstruction code next
-    | .select call alts => do
+    | .select call alts otherwise => do
       let code ←
         match call with
         | .call call => compileCode code call
@@ -163,7 +163,7 @@ mutual
           let names ← CompileM.get CompileState.names
           let name := mkIdent s!"prop_{names[name]!}"
           pure (code.push (← `(cStmtLike| uint8_t code = data->$name;)))
-      let otherwise ← compileInstruction #[] errInst
+      let otherwise ← compileInstruction #[] otherwise
       let alts ← alts.mapM $ λ(case, to) => do
         let next ← compileInstruction #[] to
         `(cStmt| case $(mkNumLit case):constExpr : { $next* })

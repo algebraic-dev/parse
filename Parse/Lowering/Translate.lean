@@ -45,7 +45,7 @@ inductive Consumer (inst: Type) where
 
 inductive Instruction : Bool → Type where
   | consumer (consumer: Consumer (Instruction false)) : Instruction true
-  | select (code: MethodOrCall) (alts: Array (Nat × (Instruction false))) : Instruction α
+  | select (code: MethodOrCall) (alts: Array (Nat × (Instruction false))) (otherwise: Instruction false) : Instruction α
   | next (chars: Nat) (next: Instruction α) : Instruction α
   | store (prop: Nat) (data: Option Nat) (next: Instruction α) : Instruction α
   | capture (prop: Nat) (next: Instruction α) : Instruction α
@@ -127,9 +127,10 @@ def compileAction (jump: Nat) (capture: Bool) (data: Option Nat) (action: Syntax
 def compileStep (jump: Nat) (step: Step Specialize.Action) : Instruction α :=
   match step.next with
   | .single action => compileAction jump step.capture step.data action
-  | .select call actions =>
+  | .select call actions otherwise =>
+    let otherwise := compileAction jump step.capture step.data otherwise
     let actions := actions.map (λ(alt, action) => (alt, compileAction jump step.capture step.data action))
-    Instruction.select call actions
+    Instruction.select call actions otherwise
 
 def groupActions (alts: Array (Char × UInt64 × Instruction false)) : Array (Check × Instruction false) :=
   let alts := alts.groupByKey (·.snd.fst)

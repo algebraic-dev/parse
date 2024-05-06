@@ -40,7 +40,7 @@ inductive Case
   | is (matchers: Array String) (action : Action)
   | peek (matchers: Array Char) (action : Action)
   | switch (matchers: Array (String × Nat)) (action : Action)
-  | select (callback: MethodOrCall) (matchers: Array (Nat × Action))
+  | select (callback: MethodOrCall) (matchers: Array (Nat × Action)) (otherwise : Action)
   | goto (consume: Bool) (action : Action)
   deriving Inhabited
 
