@@ -63,6 +63,7 @@ syntax (name := isIdentDef) "is" ident action_enclose : parsers
 syntax (name := isAllDef) "is" "[" str* "]" action_enclose : parsers
 
 syntax (name := peekDef) "peek" char action_enclose : parsers
+syntax (name := peekIdentDef) "peek" ident action_enclose : parsers
 syntax (name := peekAllDef) "peek" "[" char* "]" action_enclose : parsers
 
 syntax (name := otherwiseDef) "otherwise" action_enclose : parsers
@@ -197,6 +198,17 @@ def parseMatchers (names: Names) (syn: TSyntax `parsers) : CommandElabM Case :=
   | `(peekDef | peek $chr:char $inv) => do
     let inv ← parseEnclose names inv
     pure (Case.peek #[chr.getChar] inv)
+  | `(peekIdentDef | peek $ident $inv) => do
+    let sets := names.definitions.find? ident.getId.toString
+    match sets with
+    | some sets =>
+      let isChars := sets.all (String.length · == 1)
+      let inv ← parseEnclose names inv
+      if isChars
+        then pure (Case.peek (sets.map (String.front)) inv)
+        else throwErrorAt ident s!"its not a char set '{ident.getId.toString}'"
+    | none =>
+      throwErrorAt ident s!"cannot string set '{ident.getId.toString}'"
   | `(peekAllDef | peek [ $chr:char* ] $inv) => do
     let inv ← parseEnclose names inv
     pure (Case.peek (chr.map (·.getChar)) inv)
