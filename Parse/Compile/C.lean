@@ -218,7 +218,6 @@ mutual
       compileInstruction code (depth + 1) next
     | .goto to => do
       let state := genParseIdent "state" to
-      let expr ← `(cExpr| $(mkStrLit state.getId.toString))
       return code.push (← `(cStmt| goto $state:ident;))
     | .call call next => do
       let code ← compileCode code (depth + 1) call
