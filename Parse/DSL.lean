@@ -11,7 +11,6 @@ import Parse.Compile.C
   DSL to build a [Parse.Syntax.Grammar] and compile to a module parser inside of the module.
 -/
 
-
 namespace Parse.DSL
 
 open Lean.Elab Command Term Lean Parser Command Std

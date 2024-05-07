@@ -155,6 +155,8 @@ mutual
     | .callStore prop call => do
       let names ← CompileM.get CompileState.calls
       let name := newIdent s!"on_{names[call]!}"
+      let code := code.push (← `(cStmtLike| lean_inc(data->str);))
+      let code := code.push (← `(cStmtLike| lean_inc(data->data);))
       let code := code.push (← `(cStmtLike| lean_object* $(identNum "obj" depth):ident  = lean_apply_1(data->callbacks.$name, data->data);))
       let code := code.push (← `(cStmtLike| lean_object* $(identNum "info" depth):ident  = lean_ctor_get($(identNum "obj" depth):ident , 0);))
       let code := code.push (← `(cStmtLike| lean_object* $(identNum "code" depth):ident  = lean_ctor_get($(identNum "obj" depth):ident , 1);))
@@ -207,6 +209,8 @@ mutual
       let close ← `(cExpr| lean_unsigned_to_nat((uint64_t)p - (uint64_t)data->string));
       let code := code.push (← `(cStmtLike| int start = (uint64_t)data->$(newIdent s!"prop_{names[prop]!}_start_pos")-(uint64_t)data->string;))
       let code := code.push (← `(cStmtLike| data->$(newIdent s!"prop_{names[prop]!}_start_pos") = NULL;))
+      let code := code.push (← `(cStmtLike| lean_inc(data->str);))
+      let code := code.push (← `(cStmtLike| lean_inc(data->data);))
       let code := code.push (← `(cStmtLike| lean_object* $(identNum "obj" depth):ident = lean_apply_4(data->callbacks.$name, $start, $close, data->str, data->data)))
       let code := code.push (← `(cStmtLike| lean_object* $(identNum "info" depth):ident = lean_ctor_get($(identNum "obj" depth):ident, 0);))
       let code := code.push (← `(cStmtLike| lean_object* $(identNum "code" depth):ident = lean_ctor_get($(identNum "obj" depth):ident, 1);))
@@ -214,6 +218,8 @@ mutual
       compileInstruction code (depth + 1) next
     | .goto to => do
       let state := genParseIdent "state" to
+      let expr ← `(cExpr| $(mkStrLit state.getId.toString))
+      let code :=  code.push (← `(cStmt| printf("%s '%c'\n", $expr, *p)))
       return code.push (← `(cStmt| goto $state:ident;))
     | .call call next => do
       let code ← compileCode code (depth + 1) call
@@ -342,7 +348,7 @@ def compileBranch (machine: Machine) : CommandElabM (Array (TSyntax `cStmtLike) 
     CompileM.modify (λmachine => {machine with state := idx })
     let name := genParseIdent "state" idx
     let alts ← compileInstruction #[] 0 inst.instruction
-    branches := branches.push (← `(cStmtLike| case $name:ident: $name:ident: {$alts*}))
+    branches := branches.push (← `(cStmtLike| case $name:ident: $name:ident: {printf("state '%c'\n", *p); {$alts*}}))
 
   let maps ← CompileState.maps <$> StateT.get
 
@@ -370,6 +376,8 @@ def callSpan (str: String) : CommandElabM (TSyntax `cStmtLike) := do
   let close ← `(cExpr| lean_unsigned_to_nat(size));
   `(cStmtLike|
     if (data->$prop != NULL) {
+      lean_inc(data->str);
+      lean_inc(data->data);
       lean_object* obj = lean_apply_4(data->callbacks.$name, $start, $close, data->str, data->data);
       lean_object* info = lean_ctor_get(obj, 0);
       lean_object* code = lean_ctor_get(obj, 1);
@@ -422,7 +430,7 @@ def compile (name: Ident) (machine: Machine) : CommandElabM Unit := do
   let alloy_parse ← mangledName "alloy_parse"
 
   let fields := machine.storage.callback.map $ λ(name, _) => mkIdent $ Name.mkStr1 s!"on_{name}"
-  let applies ← fields.mapM $ λname => `(cStmtLike| lean_apply_1(f, s->callbacks.$name))
+  let applies ← fields.mapM $ λname => `(cStmtLike| lean_apply_1(f, new_data->callbacks.$name))
   let finalizers ← fields.mapM $ λname => `(cStmtLike| lean_dec(s->callbacks.$name))
   let incs ← fields.mapM $ λname => `(cStmtLike| lean_inc(new_data->callbacks.$name))
 
@@ -447,9 +455,13 @@ def compile (name: Ident) (machine: Machine) : CommandElabM Unit := do
       end
 
       alloy c opaque_extern_type $(newIdent "Data") (α: Type) => $data_t:ident where
-        $(newIdent "foreach")(s, f) := {
-          lean_apply_1(f, s->data);
-          lean_apply_1(f, s->str);
+        $(newIdent "foreach")(new_data, f) := {
+          lean_inc(new_data->str);
+          lean_inc(new_data->data);
+          {$incs*}
+
+          lean_apply_1(f, new_data->data);
+          lean_apply_1(f, new_data->str);
           {$applies*}
         }
         $(newIdent "finalize")(s) := {
@@ -496,6 +508,8 @@ def compile (name: Ident) (machine: Machine) : CommandElabM Unit := do
         data->str = s;
 
         { $resetSpans* }
+
+        printf ("Here: %.*s\n", lean_sarray_size(s), str);
 
         int res = $alloy_parse:ident(data->state, data, str, strend);
         data->state = res;

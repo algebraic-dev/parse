@@ -29,7 +29,7 @@ def mkNumLit [ToString α] (x: α) : TSyntax `num :=
 def mkCharLit (char: Char) : TSyntax `char :=
   TSyntax.mk $ Syntax.mkLit charLitKind (Char.quote char)
 
-def mkStrLit (str: String) : TSyntax `string :=
+def mkStrLit (str: String) : TSyntax `str :=
   TSyntax.mk $ Syntax.mkStrLit str
 
 def withComma (alts: Array (TSyntax α)) : Syntax.TSepArray α "," :=
