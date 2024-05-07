@@ -28,6 +28,9 @@ structure CompileState where
   maps: HashMap Interval Nat
   deriving Inhabited
 
+def identNum (name: String) (nat: Nat) : Ident :=
+  mkIdent (Name.mkStr1 s!"{name}_{nat}")
+
 def mangledName (name: String) : CommandElabM Ident := do
   let cur ← getCurrNamespace
   let name := Name.str cur name
@@ -77,13 +80,13 @@ def genCheck (code: Code) : CompileM Code := do
 def errInst : Instruction false := .error 0
 
 mutual
-  partial def ifStmt (code: Code) (comparison: TSyntax `cExpr) (ok: Instruction false) (otherwise: Instruction false) : CompileM Code := do
-    let ok ← compileInstruction #[] ok
-    let otherwise ← compileInstruction #[] otherwise
+  partial def ifStmt (depth: Nat) (code: Code) (comparison: TSyntax `cExpr) (ok: Instruction false) (otherwise: Instruction false) : CompileM Code := do
+    let ok ← compileInstruction #[] (depth + 1) ok
+    let otherwise ← compileInstruction #[] (depth + 1) otherwise
     let code := code.push (← `(cStmtLike | if ($comparison) { $ok* }))
     return code.append otherwise
 
-  partial def compileConsumer (code: Code) : Consumer (Instruction false) → CompileM Code
+  partial def compileConsumer (code: Code) (depth: Nat) : Consumer (Instruction false) → CompileM Code
     | .is str ok otherwise => do
       let match_string ← mangledName "match_string"
       let cur ← CompileM.get CompileState.state
@@ -91,8 +94,8 @@ mutual
       let str := TSyntax.mk $ Syntax.mkStrLit str
       let code := code.push (← `(cStmtLike| int result = $match_string:ident(data, $str, $n, $pointerName, $endPointerName);))
       let state := genParseIdent "state" cur
-      let then_ ← compileInstruction #[] ok
-      let otherwise ← compileInstruction #[] otherwise
+      let then_ ← compileInstruction #[] (depth + 1) ok
+      let otherwise ← compileInstruction #[] (depth + 1) otherwise
       return code.push (← `(cStmt| switch (result) {
         case PAUSED: return $state;
         case FAIL: { $otherwise* }
@@ -101,34 +104,34 @@ mutual
     | .char chr ok otherwise => do
       let code ← genCheck code
       let comparison ← `(cExpr| *$pointerName == $(mkCharLit chr))
-      ifStmt code comparison ok otherwise
+      ifStmt depth code comparison ok otherwise
     | .range range ok otherwise => do
       let code ← genCheck code
       let comparison ← compileRange (← `(cExpr| *$pointerName)) range
-      ifStmt code comparison ok otherwise
+      ifStmt depth code comparison ok otherwise
     | .map int ok otherwise => do
       let code ← genCheck code
       let comparison ← compileInterval int
-      ifStmt code comparison ok otherwise
+      ifStmt depth code comparison ok otherwise
     | .chars alts otherwise => do
       let code ← genCheck code
-      let otherwise ← compileInstruction #[] otherwise
+      let otherwise ← compileInstruction #[] (depth + 1) otherwise
       let alts ← alts.mapM $ λ(case, to) => do
-        let next ← compileInstruction #[] to
+        let next ← compileInstruction #[] (depth + 1) to
         `(cStmt| case $(mkCharLit case):constExpr : { $next* })
       let alts := alts.push (← `(cStmt| default : { $otherwise* }))
       return code.push (← `(cStmt| switch (*p) { $alts* }))
     | .mixed alts otherwise => do
       let code ← genCheck code
-      let otherwise ← compileInstruction #[] otherwise
+      let otherwise ← compileInstruction #[] (depth + 1) otherwise
       let alts ← alts.mapM $ λ(check, to) => do
-        let next ← compileInstruction #[] to
+        let next ← compileInstruction #[] (depth + 1) to
         let map ← compileCheck check
         `(cStmt| if ($map) { $next* })
       let alts := alts.append otherwise
       return code.append alts
 
-  partial def compileCode (code: Code) : Call → CompileM Code
+  partial def compileCode (code: Code) (depth: Nat) : Call → CompileM Code
     | .store method n => do
       let names ← CompileM.get CompileState.names
       let name := newIdent s!"prop_{names[method]!}"
@@ -136,10 +139,10 @@ mutual
     | .arbitrary n => do
       let names ← CompileM.get CompileState.calls
       let name := newIdent s!"on_{names[n]!}"
-      let code := code.push (← `(cStmt| lean_apply_1(data->callbacks.$name, data->data)))
-      let code := code.push (← `(cStmtLike| lean_object* info = lean_ctor_get(obj, 0);))
-      let code := code.push (← `(cStmtLike| lean_object* code = lean_ctor_get(obj, 1);))
-      return code.push (← `(cStmtLike| data->data = info;))
+      let code := code.push (← `(cStmtLike| lean_object* $(identNum "obj" depth):ident = lean_apply_1(data->callbacks.$name, data->data)))
+      let code := code.push (← `(cStmtLike| lean_object* $(identNum "info" depth):ident = lean_ctor_get($(identNum "obj" depth), 0);))
+      let code := code.push (← `(cStmtLike| lean_object* $(identNum "code" depth):ident = lean_ctor_get($(identNum "obj" depth), 1);))
+      return code.push (← `(cStmtLike| data->data = $(identNum "info" depth):ident;))
     | .loadNum n => do
       let names ← CompileM.get CompileState.names
       let name := newIdent s!"prop_{names[n]!}"
@@ -152,29 +155,29 @@ mutual
     | .callStore prop call => do
       let names ← CompileM.get CompileState.calls
       let name := newIdent s!"on_{names[call]!}"
-      let code := code.push (← `(cStmtLike| lean_object* obj = lean_apply_1(data->callbacks.$name, data->data);))
-      let code := code.push (← `(cStmtLike| lean_object* info = lean_ctor_get(obj, 0);))
-      let code := code.push (← `(cStmtLike| lean_object* code = lean_ctor_get(obj, 1);))
-      let code := code.push (← `(cStmtLike| data->data = info;))
+      let code := code.push (← `(cStmtLike| lean_object* $(identNum "obj" depth):ident  = lean_apply_1(data->callbacks.$name, data->data);))
+      let code := code.push (← `(cStmtLike| lean_object* $(identNum "info" depth):ident  = lean_ctor_get($(identNum "obj" depth):ident , 0);))
+      let code := code.push (← `(cStmtLike| lean_object* $(identNum "code" depth):ident  = lean_ctor_get($(identNum "obj" depth):ident , 1);))
+      let code := code.push (← `(cStmtLike| data->data = $(identNum "info" depth):ident;))
       let names ← CompileM.get CompileState.names
       let name := newIdent s!"prop_{names[prop]!}"
-      return code.push (← `(cStmt| data->$name = lean_unbox(code);))
+      return code.push (← `(cStmt| data->$name = lean_unbox($(identNum "code" depth):ident);))
 
-  partial def compileInstruction (code: Code) : Instruction β → CompileM Code
+  partial def compileInstruction (code: Code) (depth: Nat) : Instruction β → CompileM Code
     | .next num next => do
       let code := code.push (← `(cStmt| p += $(mkNumLit num);))
-      compileInstruction code next
+      compileInstruction code (depth + 1) next
     | .select call alts otherwise => do
       let code ←
         match call with
-        | .call call => compileCode code call
+        | .call call => compileCode code (depth + 1) call
         | .method name => do
           let names ← CompileM.get CompileState.names
           let name := newIdent s!"prop_{names[name]!}"
           pure (code.push (← `(cStmtLike| uint8_t code = data->$name;)))
-      let otherwise ← compileInstruction #[] otherwise
+      let otherwise ← compileInstruction #[] (depth + 1) otherwise
       let alts ← alts.mapM $ λ(case, to) => do
-        let next ← compileInstruction #[] to
+        let next ← compileInstruction #[] (depth + 1) to
         `(cStmt| case $(mkNumLit case):constExpr : { $next* })
       let alts := alts.push (← `(cStmt| default : { $otherwise* }))
       return code.push (← `(cStmt| switch (code) { $alts* }))
@@ -186,17 +189,17 @@ mutual
         | some data => `(cExpr| $(mkNumLit data))
         | none => `(cExpr| *p)
       let code := code.push (← `(cStmt| data->$prop = $data;))
-      compileInstruction code next
+      compileInstruction code (depth + 1) next
     | .capture prop next => do
       let names ← CompileM.get CompileState.names
       let prop := newIdent s!"prop_{names.get! prop}_start_pos"
       let code := code.push (← `(cStmt| data->$(prop) = $pointerName;))
-      compileInstruction code next
+      compileInstruction code (depth + 1) next
     | .consume prop next => do
       let names ← CompileM.get CompileState.names
       let prop := newIdent s!"prop_{names.get! prop}"
       let code := code.push (← `(cStmt| p += data->$prop;))
-      compileInstruction code next
+      compileInstruction code (depth + 1) next
     | .close prop next => do
       let names ← CompileM.get CompileState.names
       let name := newIdent s!"on_{names[prop]!}"
@@ -204,22 +207,22 @@ mutual
       let close ← `(cExpr| lean_unsigned_to_nat((uint64_t)p - (uint64_t)data->string));
       let code := code.push (← `(cStmtLike| int start = (uint64_t)data->$(newIdent s!"prop_{names[prop]!}_start_pos")-(uint64_t)data->string;))
       let code := code.push (← `(cStmtLike| data->$(newIdent s!"prop_{names[prop]!}_start_pos") = NULL;))
-      let code := code.push (← `(cStmtLike| lean_object* obj = lean_apply_4(data->callbacks.$name, $start, $close, data->str, data->data)))
-      let code := code.push (← `(cStmtLike| lean_object* info = lean_ctor_get(obj, 0);))
-      let code := code.push (← `(cStmtLike| lean_object* code = lean_ctor_get(obj, 1);))
-      let code := code.push (← `(cStmtLike| data->data = info;))
-      compileInstruction code next
+      let code := code.push (← `(cStmtLike| lean_object* $(identNum "obj" depth):ident = lean_apply_4(data->callbacks.$name, $start, $close, data->str, data->data)))
+      let code := code.push (← `(cStmtLike| lean_object* $(identNum "info" depth):ident = lean_ctor_get($(identNum "obj" depth):ident, 0);))
+      let code := code.push (← `(cStmtLike| lean_object* $(identNum "code" depth):ident = lean_ctor_get($(identNum "obj" depth):ident, 1);))
+      let code := code.push (← `(cStmtLike| data->data = $(identNum "info" depth):ident;))
+      compileInstruction code (depth + 1) next
     | .goto to => do
       let state := genParseIdent "state" to
       return code.push (← `(cStmt| goto $state:ident;))
     | .call call next => do
-      let code ← compileCode code call
-      compileInstruction code next
+      let code ← compileCode code (depth + 1) call
+      compileInstruction code (depth + 1) next
     | .error errCode => do
       let code := code.push (← `(cStmt| data->error = $(mkNumLit errCode)))
       return code.push (← `(cStmt| return -$(mkNumLit errCode);))
     | .consumer consumer =>
-      compileConsumer code consumer
+      compileConsumer code depth consumer
 end
 
 def compileTyp : Typ → Ident
@@ -338,7 +341,7 @@ def compileBranch (machine: Machine) : CommandElabM (Array (TSyntax `cStmtLike) 
   for (idx, inst) in machine.nodes.mapIdx ((·, ·)) do
     CompileM.modify (λmachine => {machine with state := idx })
     let name := genParseIdent "state" idx
-    let alts ← compileInstruction #[] inst.instruction
+    let alts ← compileInstruction #[] 0 inst.instruction
     branches := branches.push (← `(cStmtLike| case $name:ident: $name:ident: {$alts*}))
 
   let maps ← CompileState.maps <$> StateT.get
@@ -365,10 +368,9 @@ def callSpan (str: String) : CommandElabM (TSyntax `cStmtLike) := do
   let prop := newIdent s!"prop_{str}_start_pos"
   let start ← `(cExpr| lean_unsigned_to_nat((uint64_t)data->$(newIdent s!"prop_{str}_start_pos")-(uint64_t)str));
   let close ← `(cExpr| lean_unsigned_to_nat(size));
-  let code := (← `(cStmtLike| lean_object* obj = lean_apply_4(data->callbacks.$name, $start, $close, data->str, data->data)))
   `(cStmtLike|
     if (data->$prop != NULL) {
-      $code
+      lean_object* obj = lean_apply_4(data->callbacks.$name, $start, $close, data->str, data->data);
       lean_object* info = lean_ctor_get(obj, 0);
       lean_object* code = lean_ctor_get(obj, 1);
       data->data = info;
@@ -399,7 +401,7 @@ def bitMaps (maps: HashMap Interval Nat) : CommandElabM (Array (TSyntax  `Alloy.
 def compile (name: Ident) (machine: Machine) : CommandElabM Unit := do
 
   let params ← machine.storage.callback.mapM (λ(x, isSpan) => do
-    let typ ← if isSpan then `(Nat → Nat → String → α → (α × Int)) else `(α → (α × Int))
+    let typ ← if isSpan then `(Nat → Nat → ByteArray → α → (α × Int)) else `(α → (α × Int))
     `(Lean.Parser.Term.bracketedBinderF | ($(newIdent s!"on_{x}") : $typ)))
   let assign ← machine.storage.callback.mapM (λ(x, _) => `(cStmtLike | data->callbacks.$(newIdent s!"on_{x}"):ident = $(newIdent s!"on_{x}");))
 
@@ -472,7 +474,7 @@ def compile (name: Ident) (machine: Machine) : CommandElabM Unit := do
       }
 
       alloy c extern
-      def $(newIdent "parse") {α: Type} (data_obj: $(newIdent "Data") α) (s: String) (size: UInt32) : $(newIdent "Data") α := {
+      def $(newIdent "parse") {α: Type} (data_obj: $(newIdent "Data") α) (s: ByteArray) (size: UInt32) : $(newIdent "Data") α := {
         if (!lean_is_exclusive(data_obj)) {
           $data_t:ident* new_data = ($data_t:ident*)calloc(1, sizeof($data_t:ident));
           memcpy(new_data, ($data_t:ident*)lean_get_external_data(data_obj), sizeof($data_t:ident));
@@ -487,8 +489,8 @@ def compile (name: Ident) (machine: Machine) : CommandElabM Unit := do
 
         $data_t:ident* data = lean_get_external_data(data_obj);
 
-        const char* str = lean_string_cstr(s);
-        const char* strend = str + size;
+        const char* str = (char*) lean_sarray_cptr(s);
+        const char* strend = str + lean_sarray_size(s);
 
         data->string = str;
         data->str = s;

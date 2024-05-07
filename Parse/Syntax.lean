@@ -13,6 +13,7 @@ inductive Capture
   | data
   deriving Inhabited, Hashable, Repr
 
+/-- Calls that can change the state of the parser -/
 inductive Call where
   | arbitrary (name: Nat)
   | mulAdd (prop: Nat)
