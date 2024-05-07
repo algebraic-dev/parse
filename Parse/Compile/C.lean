@@ -219,7 +219,6 @@ mutual
     | .goto to => do
       let state := genParseIdent "state" to
       let expr ← `(cExpr| $(mkStrLit state.getId.toString))
-      let code :=  code.push (← `(cStmt| printf("%s '%c'\n", $expr, *p)))
       return code.push (← `(cStmt| goto $state:ident;))
     | .call call next => do
       let code ← compileCode code (depth + 1) call
@@ -348,7 +347,7 @@ def compileBranch (machine: Machine) : CommandElabM (Array (TSyntax `cStmtLike) 
     CompileM.modify (λmachine => {machine with state := idx })
     let name := genParseIdent "state" idx
     let alts ← compileInstruction #[] 0 inst.instruction
-    branches := branches.push (← `(cStmtLike| case $name:ident: $name:ident: {printf("state '%c'\n", *p); {$alts*}}))
+    branches := branches.push (← `(cStmtLike| case $name:ident: $name:ident: {$alts*}))
 
   let maps ← CompileState.maps <$> StateT.get
 
@@ -508,8 +507,6 @@ def compile (name: Ident) (machine: Machine) : CommandElabM Unit := do
         data->str = s;
 
         { $resetSpans* }
-
-        printf ("Here: %.*s\n", lean_sarray_size(s), str);
 
         int res = $alloy_parse:ident(data->state, data, str, strend);
         data->state = res;
