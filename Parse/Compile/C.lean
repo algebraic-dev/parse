@@ -139,7 +139,8 @@ mutual
     | .arbitrary n => do
       let names ← CompileM.get CompileState.calls
       let name := newIdent s!"on_{names[n]!}"
-      let code := code.push (← `(cStmtLike| lean_object* $(identNum "obj" depth):ident = lean_apply_1(data->callbacks.$name, data->data)))
+      let code := code.push (← `(cStmtLike| lean_object* $(identNum "io" depth):ident = lean_apply_2(data->callbacks.$name, data->data, lean_io_mk_world())))
+      let code := code.push (← `(cStmtLike| lean_object* $(identNum "obj" depth):ident = lean_ctor_get($(identNum "io" depth), 0);))
       let code := code.push (← `(cStmtLike| lean_object* $(identNum "info" depth):ident = lean_ctor_get($(identNum "obj" depth), 0);))
       let code := code.push (← `(cStmtLike| lean_object* $(identNum "code" depth):ident = lean_ctor_get($(identNum "obj" depth), 1);))
       return code.push (← `(cStmtLike| data->data = $(identNum "info" depth):ident;))
@@ -157,7 +158,8 @@ mutual
       let name := newIdent s!"on_{names[call]!}"
       let code := code.push (← `(cStmtLike| lean_inc(data->str);))
       let code := code.push (← `(cStmtLike| lean_inc(data->data);))
-      let code := code.push (← `(cStmtLike| lean_object* $(identNum "obj" depth):ident  = lean_apply_1(data->callbacks.$name, data->data);))
+      let code := code.push (← `(cStmtLike| lean_object* $(identNum "io" depth):ident  = lean_apply_2(data->callbacks.$name, data->data, lean_io_mk_world());))
+      let code := code.push (← `(cStmtLike| lean_object* $(identNum "obj" depth):ident = lean_ctor_get($(identNum "io" depth), 0);))
       let code := code.push (← `(cStmtLike| lean_object* $(identNum "info" depth):ident  = lean_ctor_get($(identNum "obj" depth):ident , 0);))
       let code := code.push (← `(cStmtLike| lean_object* $(identNum "code" depth):ident  = lean_ctor_get($(identNum "obj" depth):ident , 1);))
       let code := code.push (← `(cStmtLike| data->data = $(identNum "info" depth):ident;))
@@ -211,7 +213,8 @@ mutual
       let code := code.push (← `(cStmtLike| data->$(newIdent s!"prop_{names[prop]!}_start_pos") = NULL;))
       let code := code.push (← `(cStmtLike| lean_inc(data->str);))
       let code := code.push (← `(cStmtLike| lean_inc(data->data);))
-      let code := code.push (← `(cStmtLike| lean_object* $(identNum "obj" depth):ident = lean_apply_4(data->callbacks.$name, $start, $close, data->str, data->data)))
+      let code := code.push (← `(cStmtLike| lean_object* $(identNum "io" depth):ident = lean_apply_5(data->callbacks.$name, $start, $close, data->str, data->data, lean_io_mk_world())))
+      let code := code.push (← `(cStmtLike| lean_object* $(identNum "obj" depth):ident = lean_ctor_get($(identNum "io" depth), 0);))
       let code := code.push (← `(cStmtLike| lean_object* $(identNum "info" depth):ident = lean_ctor_get($(identNum "obj" depth):ident, 0);))
       let code := code.push (← `(cStmtLike| lean_object* $(identNum "code" depth):ident = lean_ctor_get($(identNum "obj" depth):ident, 1);))
       let code := code.push (← `(cStmtLike| data->data = $(identNum "info" depth):ident;))
@@ -376,7 +379,8 @@ def callSpan (str: String) : CommandElabM (TSyntax `cStmtLike) := do
     if (data->$prop != NULL) {
       lean_inc(data->str);
       lean_inc(data->data);
-      lean_object* obj = lean_apply_4(data->callbacks.$name, $start, $close, data->str, data->data);
+      lean_object* io = lean_apply_5(data->callbacks.$name, $start, $close, data->str, data->data, lean_io_mk_world());
+      lean_object* obj = lean_ctor_get(io, 0);
       lean_object* info = lean_ctor_get(obj, 0);
       lean_object* code = lean_ctor_get(obj, 1);
       data->data = info;
@@ -407,7 +411,7 @@ def bitMaps (maps: HashMap Interval Nat) : CommandElabM (Array (TSyntax  `Alloy.
 def compile (name: Ident) (machine: Machine) : CommandElabM Unit := do
 
   let params ← machine.storage.callback.mapM (λ(x, isSpan) => do
-    let typ ← if isSpan then `(Nat → Nat → ByteArray → α → (α × Int)) else `(α → (α × Int))
+    let typ ← if isSpan then `(Nat → Nat → ByteArray → α → IO (α × Int)) else `(α → IO (α × Int))
     `(Lean.Parser.Term.bracketedBinderF | ($(newIdent s!"on_{x}") : $typ)))
   let assign ← machine.storage.callback.mapM (λ(x, _) => `(cStmtLike | data->callbacks.$(newIdent s!"on_{x}"):ident = $(newIdent s!"on_{x}");))
 
@@ -471,7 +475,7 @@ def compile (name: Ident) (machine: Machine) : CommandElabM Unit := do
 
 
       alloy c extern
-      def $(newIdent "create") {α: Type} (info: α) $params* : $(newIdent "Data") α := {
+      def $(newIdent "create") {α: Type} (info: α) $params* : IO ($(newIdent "Data") α) := {
         $data_t:ident* data = ($data_t:ident*)calloc(1, sizeof($data_t:ident));
         data->data = info;
         data->str = lean_mk_string_from_bytes("uwu", 3);
@@ -480,11 +484,11 @@ def compile (name: Ident) (machine: Machine) : CommandElabM Unit := do
 
         lean_object* data_obj = to_lean<$data>(data);
 
-        return data_obj;
+        return lean_io_result_mk_ok(data_obj);
       }
 
       alloy c extern
-      def $(newIdent "parse") {α: Type} (data_obj: $(newIdent "Data") α) (s: ByteArray) (size: UInt32) : $(newIdent "Data") α := {
+      def $(newIdent "parse") {α: Type} (data_obj: $(newIdent "Data") α) (s: ByteArray) : IO ($(newIdent "Data") α) := {
         if (!lean_is_exclusive(data_obj)) {
           $data_t:ident* new_data = ($data_t:ident*)calloc(1, sizeof($data_t:ident));
           memcpy(new_data, ($data_t:ident*)lean_get_external_data(data_obj), sizeof($data_t:ident));
@@ -499,8 +503,9 @@ def compile (name: Ident) (machine: Machine) : CommandElabM Unit := do
 
         $data_t:ident* data = lean_get_external_data(data_obj);
 
+        uint64_t size = lean_sarray_size(s);
         const char* str = (char*) lean_sarray_cptr(s);
-        const char* strend = str + lean_sarray_size(s);
+        const char* strend = str + size;
 
         data->string = str;
         data->str = s;
@@ -511,12 +516,12 @@ def compile (name: Ident) (machine: Machine) : CommandElabM Unit := do
         data->state = res;
 
         if (data->error) {
-          return data_obj;
+          return lean_io_result_mk_ok(data_obj);
         }
 
         { $callSpans* }
 
-        return data_obj;
+        return lean_io_result_mk_ok(data_obj);
       }
 
       alloy c extern

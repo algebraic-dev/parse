@@ -27,54 +27,53 @@ declare_syntax_cat node
 declare_syntax_cat code
 declare_syntax_cat typ
 
-syntax ":" &"u8" : typ
-syntax ":" &"u16" : typ
-syntax ":" &"u32" : typ
-syntax ":" &"u64" : typ
-syntax ":" &"char" : typ
-syntax ":" &"span" : typ
+scoped syntax ":" &"u8" : typ
+scoped syntax ":" &"u16" : typ
+scoped syntax ":" &"u32" : typ
+scoped syntax ":" &"u64" : typ
+scoped syntax ":" &"char" : typ
+scoped syntax ":" &"span" : typ
 
-syntax (name := callCode) "(" &"mulAdd" ident ")" : code
-syntax (name := callLoad) "(" &"loadNum" ident ")" : code
-syntax (name := callStore) "(" &"callStore" ident ident ")" : code
-syntax (name := callStoreNum) "(" &"store" ident num ")" : code
-syntax (name := callIdent) ident : code
+scoped syntax (name := callCode) "(" &"mulAdd" ident ")" : code
+scoped syntax (name := callLoad) "(" &"loadNum" ident ")" : code
+scoped syntax (name := callStore) "(" &"callStore" ident ident ")" : code
+scoped syntax (name := callStoreNum) "(" &"store" ident num ")" : code
+scoped syntax (name := callIdent) ident : code
+scoped syntax (name := actionCallback) "call" code action_enclose: action
+scoped syntax (name := actionStore) "store" ident action_enclose: action
+scoped syntax (name := actionStart) "start" ident action_enclose: action
+scoped syntax (name := actionEnd) "end" ident action_enclose: action
+scoped syntax (name := actionConsume) "consume" ident action_enclose: action
+scoped syntax (name := actionError) "error" term : action
+scoped syntax (name := actionNode) ident : action
 
-syntax (name := actionCallback) "call" code action_enclose: action
-syntax (name := actionStore) "store" ident action_enclose: action
-syntax (name := actionStart) "start" ident action_enclose: action
-syntax (name := actionEnd) "end" ident action_enclose: action
-syntax (name := actionConsume) "consume" ident action_enclose: action
-syntax (name := actionError) "error" term : action
-syntax (name := actionNode) ident : action
+scoped syntax (name := actionEnclosePar) "(" action ")" : action_enclose
+scoped syntax (name := actionEnclose) action : action_enclose
 
-syntax (name := actionEnclosePar) "(" action ")" : action_enclose
-syntax (name := actionEnclose) action : action_enclose
+scoped syntax (name := switchClause) "|" str "=>" term : clause
+scoped syntax (name := selectClause) "|" num "=>" action : selectClause
 
-syntax (name := switchClause) "|" str "=>" term : clause
-syntax (name := selectClause) "|" num "=>" action : selectClause
+scoped syntax (name := switchDef) "switch" action_enclose clause* : parsers
+scoped syntax (name := selectIdentDef) "select" "(" &"read" ident ")" selectClause* &"default" "=>" action : parsers
+scoped syntax (name := selectDef) "select" code selectClause* &"default" "=>" action : parsers
 
-syntax (name := switchDef) "switch" action_enclose clause* : parsers
-syntax (name := selectIdentDef) "select" "(" &"read" ident ")" selectClause* &"default" "=>" action : parsers
-syntax (name := selectDef) "select" code selectClause* &"default" "=>" action : parsers
+scoped syntax (name := isDef) "is" str action_enclose : parsers
+scoped syntax (name := isIdentDef) "is" ident action_enclose : parsers
+scoped syntax (name := isAllDef) "is" "[" str* "]" action_enclose : parsers
 
-syntax (name := isDef) "is" str action_enclose : parsers
-syntax (name := isIdentDef) "is" ident action_enclose : parsers
-syntax (name := isAllDef) "is" "[" str* "]" action_enclose : parsers
+scoped syntax (name := peekDef) "peek" char action_enclose : parsers
+scoped syntax (name := peekIdentDef) "peek" ident action_enclose : parsers
+scoped syntax (name := peekAllDef) "peek" "[" char* "]" action_enclose : parsers
 
-syntax (name := peekDef) "peek" char action_enclose : parsers
-syntax (name := peekIdentDef) "peek" ident action_enclose : parsers
-syntax (name := peekAllDef) "peek" "[" char* "]" action_enclose : parsers
+scoped syntax (name := otherwiseDef) "otherwise" action_enclose : parsers
+scoped syntax (name := anyDef) "any" action_enclose : parsers
 
-syntax (name := otherwiseDef) "otherwise" action_enclose : parsers
-syntax (name := anyDef) "any" action_enclose : parsers
+scoped syntax (name := nodeDef) "node " ident ("where" <|> ":=") parsers* : node
 
-syntax (name := nodeDef) "node " ident ("where" <|> ":=") parsers* : node
+scoped syntax (name := propertyDef) "def " ident typ : command
+scoped syntax (name := setDef) "set " ident ":=" "[" str* "]" : command
 
-syntax (name := propertyDef) "def " ident typ : command
-syntax (name := setDef) "set " ident ":=" "[" str* "]" : command
-
-syntax (name := callbackDef) &"callback " ident : command
+scoped syntax (name := callbackDef) &"callback " ident : command
 
 -- Construction of the Syntax
 
