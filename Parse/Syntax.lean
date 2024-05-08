@@ -64,7 +64,7 @@ inductive Typ
 /-- Storage describes each field that stores some information in  -/
 structure Storage where
   props: Array (String × Typ)
-  callback: Array (String × Bool)
+  callback: Array ((String × Array Nat) × Bool)
   deriving Inhabited
 
 /-- Description of a parser -/

@@ -24,7 +24,7 @@ structure CompileState where
   state : Nat
   names : Array String
   props : Array String
-  calls : Array String
+  calls : Array (String × Array Nat)
   maps: HashMap Interval Nat
   deriving Inhabited
 
@@ -138,8 +138,20 @@ mutual
       return  code.push (← `(cStmt| data->$name = $(mkNumLit n);))
     | .arbitrary n => do
       let names ← CompileM.get CompileState.calls
-      let name := newIdent s!"on_{names[n]!}"
-      let code := code.push (← `(cStmtLike| lean_object* $(identNum "io" depth):ident = lean_apply_2(data->callbacks.$name, data->data, lean_io_mk_world())))
+      let propsNames ← CompileM.get CompileState.names
+      let (name, props) := names[n]!
+      let name := newIdent s!"on_{name}"
+
+      let props := props.map (λprop => mkIdent $ Name.mkStr1 $ s!"prop_{propsNames[prop]!}")
+      let props ← props.mapM (λprop => `(cExpr| lean_unsigned_to_nat(data->$prop)))
+
+      let props := Array.append #[← `(cExpr| data->callbacks.$name), ← `(cExpr| data->data)] props
+      let props := props.push (← `(cExpr| lean_io_mk_world()))
+      let propsArr := withComma props
+
+      let func := mkIdent (Name.mkStr1 s!"lean_apply_{props.size - 1}")
+
+      let code := code.push (← `(cStmtLike| lean_object* $(identNum "io" depth):ident = $func:ident($propsArr,*)))
       let code := code.push (← `(cStmtLike| lean_object* $(identNum "obj" depth):ident = lean_ctor_get($(identNum "io" depth), 0);))
       let code := code.push (← `(cStmtLike| lean_object* $(identNum "info" depth):ident = lean_ctor_get($(identNum "obj" depth), 0);))
       let code := code.push (← `(cStmtLike| lean_object* $(identNum "code" depth):ident = lean_ctor_get($(identNum "obj" depth), 1);))
@@ -155,7 +167,7 @@ mutual
       return code.push (← `(cStmt| data->$name += *p - '0';))
     | .callStore prop call => do
       let names ← CompileM.get CompileState.calls
-      let name := newIdent s!"on_{names[call]!}"
+      let name := newIdent s!"on_{names[call]!.fst}"
       let code := code.push (← `(cStmtLike| lean_inc(data->str);))
       let code := code.push (← `(cStmtLike| lean_inc(data->data);))
       let code := code.push (← `(cStmtLike| lean_object* $(identNum "io" depth):ident  = lean_apply_2(data->callbacks.$name, data->data, lean_io_mk_world());))
@@ -256,7 +268,7 @@ def enumStates (machine: Machine) : CommandElabM (TSyntax `cCmd) := do
   )
 
 def callbacksStruct (storage: Storage) : CommandElabM (TSyntax `cCmd) := do
-  let fields ← storage.callback.mapM $ λ(name, _) =>
+  let fields ← storage.callback.mapM $ λ((name, _), _) =>
     let name := mkIdent $ Name.mkStr1 s!"on_{name}"
     `(Alloy.C.aggrDeclaration| lean_object *$name:ident )
 
@@ -340,10 +352,9 @@ def alloyParse (name: Ident) (branches: Array (TSyntax `cStmtLike)) : CommandEla
 
 def compileBranch (machine: Machine) : CommandElabM (Array (TSyntax `cStmtLike) × HashMap Interval Nat) := CompileM.run do
   CompileM.modify (λstate => {state with names := machine.storage.props.map Prod.fst
-                                        ,calls := machine.storage.callback.map Prod.fst})
+                                        ,calls := machine.storage.callback.map (Prod.fst)})
 
   let mut branches := #[]
-
 
   for (idx, inst) in machine.nodes.mapIdx ((·, ·)) do
     CompileM.modify (λmachine => {machine with state := idx })
@@ -352,9 +363,7 @@ def compileBranch (machine: Machine) : CommandElabM (Array (TSyntax `cStmtLike) 
     branches := branches.push (← `(cStmtLike| case $name:ident: $name:ident: {$alts*}))
 
   let maps ← CompileState.maps <$> StateT.get
-
   return (branches, maps)
-
 
 def spanProps (storage: Storage) : Array String :=
   storage.props.filterMap $ λ(name, typ) =>
@@ -411,18 +420,23 @@ def bitMaps (maps: HashMap Interval Nat) : CommandElabM (Array (TSyntax  `Alloy.
 def compile (name: Ident) (machine: Machine) : CommandElabM Unit := do
 
   let params ← machine.storage.callback.mapM (λ(x, isSpan) => do
-    let typ ← if isSpan then `(Nat → Nat → ByteArray → α → IO (α × Int)) else `(α → IO (α × Int))
-    `(Lean.Parser.Term.bracketedBinderF | ($(newIdent s!"on_{x}") : $typ)))
-  let assign ← machine.storage.callback.mapM (λ(x, _) => `(cStmtLike | data->callbacks.$(newIdent s!"on_{x}"):ident = $(newIdent s!"on_{x}");))
+    let typ ← if isSpan then `(Nat → Nat → ByteArray → α → IO (α × Int)) else
+      let ret ← `(IO (α × Int))
+      let res ← x.snd.foldlM (λx _ => `(Nat → $x)) ret
+      `(α → $res)
+
+    `(Lean.Parser.Term.bracketedBinderF | ($(newIdent s!"on_{x.fst}") : $typ)))
+
+  let assign ← machine.storage.callback.mapM (λ((x, _), _) => `(cStmtLike | data->callbacks.$(newIdent s!"on_{x}"):ident = $(newIdent s!"on_{x}");))
 
   let names := spanProps machine.storage
   let resetSpans ← names.mapM resetSpan
   let callSpans ← names.mapM callSpan
 
   let getters ← (machine.storage.props.filter (λ(_, typ) =>
-                  match typ with
-                  | .span => false
-                  | _ => true)).mapM (getter ∘ Prod.fst)
+    match typ with
+    | .span => false
+    | _ => true)).mapM (getter ∘ Prod.fst)
 
   let data :=  newIdent "Data"
 
@@ -431,7 +445,7 @@ def compile (name: Ident) (machine: Machine) : CommandElabM Unit := do
   let data_t ← mangledName "data_t"
   let alloy_parse ← mangledName "alloy_parse"
 
-  let fields := machine.storage.callback.map $ λ(name, _) => mkIdent $ Name.mkStr1 s!"on_{name}"
+  let fields := machine.storage.callback.map $ λ((name, _), _) => mkIdent $ Name.mkStr1 s!"on_{name}"
   let applies ← fields.mapM $ λname => `(cStmtLike| lean_apply_1(f, new_data->callbacks.$name))
   let finalizers ← fields.mapM $ λname => `(cStmtLike| lean_dec(s->callbacks.$name))
   let incs ← fields.mapM $ λname => `(cStmtLike| lean_inc(new_data->callbacks.$name))

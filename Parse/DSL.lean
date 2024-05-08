@@ -73,7 +73,7 @@ scoped syntax (name := nodeDef) "node " ident ("where" <|> ":=") parsers* : node
 scoped syntax (name := propertyDef) "def " ident typ : command
 scoped syntax (name := setDef) "set " ident ":=" "[" str* "]" : command
 
-scoped syntax (name := callbackDef) &"callback " ident : command
+scoped syntax (name := callbackDef) &"callback " ident (":" ident*)? : command
 
 -- Construction of the Syntax
 
@@ -82,7 +82,7 @@ structure Names where
   properties: HashMap String Nat
   callback: HashMap String Nat
   nodes: HashMap String Nat
-  callbacks: Array String
+  callbacks: Array (String × Array Nat)
 
 def ensure (syn: Syntax) (name: String) (func: String → Option α) : CommandElabM α :=
   match func name with
@@ -236,8 +236,12 @@ def parseProp : TSyntax `Parse.DSL.propertyDef → CommandElabM (String × Typ)
     pure (name.getId.toString, typ)
   | syn => Lean.throwErrorAt syn "unsupported syntax"
 
-def parseCall : TSyntax `Parse.DSL.callbackDef → CommandElabM String
-  | `(callbackDef | callback $name) => pure name.getId.toString
+def parseCall (properties: HashMap String Nat)  : TSyntax `Parse.DSL.callbackDef → CommandElabM (String × Array Nat)
+  | `(callbackDef | callback $name : $props*) => do
+    let props ← props.mapM (λx => ensure x x.getId.toString properties.find?)
+    pure (name.getId.toString, props)
+  | `(callbackDef | callback $name) => do
+    pure (name.getId.toString, #[])
   | syn => Lean.throwErrorAt syn "unsupported syntax"
 
 def getNodeName : TSyntax `Parse.DSL.nodeDef → CommandElabM String
@@ -261,13 +265,14 @@ elab "parser " name:ident "where" synProps:propertyDef* synSet:setDef* synCalls:
 
   let setNames ← synSet.mapM parseSet
 
-  let callNames ← synCalls.mapM (λx => (·, false) <$> parseCall x)
+  let propSet := arrToMap propNames
 
-  -- Add callback for spans
-  let callNames := callNames.append (props.filterMap $ λx => match x.snd with |.span => (x.fst, true) | _ => none)
+  let callNames ← synCalls.mapM (λx => (·, false) <$> parseCall propSet x)
+  let callNames := callNames.append (props.filterMap $ λx => match x.snd with |.span => some ((x.fst, #[]), true) | _ => none)
 
   let callStrs := callNames.map Prod.fst
-  let names := Names.mk (HashMap.ofList setNames.toList) (arrToMap propNames) (arrToMap callStrs) (arrToMap nodeNames) callStrs
+
+  let names := Names.mk (HashMap.ofList setNames.toList) propSet (arrToMap (callStrs.map Prod.fst)) (arrToMap nodeNames) callStrs
 
   let nodes ← synNodes.mapM (parseNode names)
   let storage := Storage.mk props callNames
