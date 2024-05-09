@@ -13,14 +13,16 @@ namespace Parse.Lowering.Specialize
 open Parse.Lowering.Interval
 open Parse.Syntax
 
-/-- Match is what checks a subject and what says what`s next after matching -/
+abbrev Fuel := Nat
+
+--| Match is what checks a subject and what says what`s next after matching
 structure Match (k: Type) (v: Type) where
   subject: k
   capture: Bool
   next: v
   deriving Hashable, Repr
 
-/-- The action and some info to execute after matching something -/
+--| The action and some info to execute after matching something
 structure Step (α: Type) where
   data: Option Nat
   capture: Bool
@@ -30,20 +32,18 @@ structure Step (α: Type) where
 def Step.ofCase (case: Case α) : Step α :=
   Step.mk case.store case.capture case.action
 
-/-- Branches of different types -/
+--| Branches of different types
 inductive Branch (α: Type)
   | string (next: Match String α)
   | chars (chars: Array (Match Char α))
   deriving Hashable, Repr
 
-/-- Matching tree -/
+--| Matching tree
 inductive Tree (α: Type) where
   | branch (cases: Branch (Tree α)) (default: Step α)
   | done (step: Step α)
   | fail
   deriving Hashable, Repr, Inhabited
-
-abbrev Fuel := Nat
 
 def Problem.accumulate (problem: Problem α) (acc: String) : Fuel → (Problem α × String)
   | 0 => (problem, acc)
@@ -80,6 +80,6 @@ def Problem.solve' (problem: Problem Action) : Nat → Tree Action
 
       Tree.branch branch otherwise
 
-/-- Solves the problem returning a tree of actions -/
+--| Solves the problem returning a tree of actions
 def Problem.solve (problem: Problem Action) : Tree Action :=
   problem.solve' problem.stepsNum

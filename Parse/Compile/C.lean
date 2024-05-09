@@ -8,7 +8,6 @@ import Alloy.C
 import Alloy.C.Grammar
 
 import Parse.Lowering
-import Parse.Compile.C.Helpers
 
 /-!
   Compiles a [Parse.Syntax.Grammar] into C using the alloy library
@@ -27,6 +26,46 @@ structure CompileState where
   calls : Array (String × Array Nat)
   maps: HashMap Interval Nat
   deriving Inhabited
+
+def pointerName : Ident := mkIdent $ Name.mkStr1 "p"
+
+def endPointerName : Ident := mkIdent $ Name.mkStr1 "endp"
+
+def mkNumLit [ToString α] (x: α) : TSyntax `num :=
+  TSyntax.mk (Syntax.mkNumLit (ToString.toString x))
+
+def mkCharLit (char: Char) : TSyntax `char :=
+  TSyntax.mk $ Syntax.mkLit charLitKind (Char.quote char)
+
+def mkStrLit (str: String) : TSyntax `str :=
+  TSyntax.mk $ Syntax.mkStrLit str
+
+def withComma (alts: Array (TSyntax α)) : Syntax.TSepArray α "," :=
+  alts.foldl Syntax.TSepArray.push (Syntax.TSepArray.mk #[] (sep := ","))
+
+def genParseIdent (name: String) (num: Nat) : Ident :=
+  mkIdent (Name.mkStr1 s!"parse_{name}_{num}")
+
+def compileRange (name: TSyntax `cExpr) (range: Lowering.Range) : CommandElabM (TSyntax `cExpr) := do
+  let fstChar : TSyntax `char := mkCharLit $ Char.ofNat (range.val.fst.toNat)
+  if range.val.fst != range.val.snd then
+    let sndChar : TSyntax `char := mkCharLit $ Char.ofNat (range.val.snd.toNat)
+    if range.val.fst == range.val.snd - 1
+      then `(cExpr | ($name == $fstChar || $name == $sndChar))
+      else `(cExpr | ($name >= $fstChar && $name <= $sndChar))
+  else `(cExpr | ($name == $fstChar))
+
+def compileBitMap (name: Ident) (int: Lowering.Interval) : CommandElabM (TSyntax `Alloy.C.declaration) := do
+  let mut alts := #[]
+
+  for i in [0:255] do
+    let int := mkNumLit (if int.in i.toUInt8 then 1 else 0)
+    let lit ← `(Alloy.C.initializerElem | $int)
+    alts := alts.push lit
+
+  let f := withComma alts
+
+  `(Alloy.C.declaration | uint8_t $name:ident[] = {$f,*,})
 
 def identNum (name: String) (nat: Nat) : Ident :=
   mkIdent (Name.mkStr1 s!"{name}_{nat}")
@@ -76,8 +115,6 @@ def genCheck (code: Code) : CompileM Code := do
   let cur ← CompileM.get CompileState.state
   let state := genParseIdent "state" cur
   return code.push (← `(cStmt| if (p == endp) return $state;))
-
-def errInst : Instruction false := .error 0
 
 mutual
   partial def ifStmt (depth: Nat) (code: Code) (comparison: TSyntax `cExpr) (ok: Instruction false) (otherwise: Instruction false) : CompileM Code := do
@@ -166,6 +203,7 @@ mutual
       let code := code.push (← `(cStmt| data->$name *= 10;))
       return code.push (← `(cStmt| data->$name += *p - '0';))
     | .callStore prop call => do
+      -- FIX
       let names ← CompileM.get CompileState.calls
       let name := newIdent s!"on_{names[call]!.fst}"
       let code := code.push (← `(cStmtLike| lean_inc(data->str);))
@@ -186,17 +224,19 @@ mutual
     | .select call alts otherwise => do
       let code ←
         match call with
-        | .call call => compileCode code (depth + 1) call
+        | .call call => do
+          let code ← compileCode code (depth + 1) call
+          pure (code.push (← `(cStmtLike| uint8_t $(identNum "result" (depth + 1)):ident = lean_unbox($(identNum "code" (depth + 1)):ident);)))
         | .method name => do
           let names ← CompileM.get CompileState.names
           let name := newIdent s!"prop_{names[name]!}"
-          pure (code.push (← `(cStmtLike| uint8_t code = data->$name;)))
+          pure (code.push (← `(cStmtLike| uint8_t $(identNum "result" (depth + 1)):ident = data->$name;)))
       let otherwise ← compileInstruction #[] (depth + 1) otherwise
       let alts ← alts.mapM $ λ(case, to) => do
         let next ← compileInstruction #[] (depth + 1) to
         `(cStmt| case $(mkNumLit case):constExpr : { $next* })
       let alts := alts.push (← `(cStmt| default : { $otherwise* }))
-      return code.push (← `(cStmt| switch (code) { $alts* }))
+      return code.push (← `(cStmt| switch ($(identNum "result" (depth + 1)):ident) { $alts* }))
     | .store prop data next => do
       let names ← CompileM.get CompileState.names
       let prop := newIdent s!"prop_{names.get! prop}"
@@ -219,9 +259,9 @@ mutual
     | .close prop next => do
       let names ← CompileM.get CompileState.names
       let name := newIdent s!"on_{names[prop]!}"
-      let start ← `(cExpr| lean_unsigned_to_nat(start));
+      let start ← `(cExpr| lean_unsigned_to_nat($(identNum "start" depth):ident));
       let close ← `(cExpr| lean_unsigned_to_nat((uint64_t)p - (uint64_t)data->string));
-      let code := code.push (← `(cStmtLike| int start = (uint64_t)data->$(newIdent s!"prop_{names[prop]!}_start_pos")-(uint64_t)data->string;))
+      let code := code.push (← `(cStmtLike| int $(identNum "start" depth):ident = (uint64_t)data->$(newIdent s!"prop_{names[prop]!}_start_pos")-(uint64_t)data->string;))
       let code := code.push (← `(cStmtLike| data->$(newIdent s!"prop_{names[prop]!}_start_pos") = NULL;))
       let code := code.push (← `(cStmtLike| lean_inc(data->str);))
       let code := code.push (← `(cStmtLike| lean_inc(data->data);))

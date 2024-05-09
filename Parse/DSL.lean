@@ -6,6 +6,7 @@ import Lean.Parser.Extra
 import Parse.Syntax
 import Parse.Lowering
 import Parse.Compile.C
+import Parse.Compile.Lean
 
 /-!
   DSL to build a [Parse.Syntax.Grammar] and compile to a module parser inside of the module.
@@ -39,6 +40,7 @@ scoped syntax (name := callLoad) "(" &"loadNum" ident ")" : code
 scoped syntax (name := callStore) "(" &"callStore" ident ident ")" : code
 scoped syntax (name := callStoreNum) "(" &"store" ident num ")" : code
 scoped syntax (name := callIdent) ident : code
+
 scoped syntax (name := actionCallback) "call" code action_enclose: action
 scoped syntax (name := actionStore) "store" ident action_enclose: action
 scoped syntax (name := actionStart) "start" ident action_enclose: action
@@ -210,8 +212,7 @@ def parseMatchers (names: Names) (syn: TSyntax `parsers) : CommandElabM Case :=
       if isChars
         then pure (Case.peek (sets.map (String.front)) inv)
         else throwErrorAt ident s!"its not a char set '{ident.getId.toString}'"
-    | none =>
-      throwErrorAt ident s!"cannot string set '{ident.getId.toString}'"
+    | none => throwErrorAt ident s!"cannot string set '{ident.getId.toString}'"
   | `(peekAllDef | peek [ $chr:char* ] $inv) => do
     let inv ← parseEnclose names inv
     pure (Case.peek (chr.map (·.getChar)) inv)
@@ -259,25 +260,17 @@ def arrToMap [BEq α] [Hashable α] (arr: Array α) : HashMap α Nat :=
 
 elab "parser " name:ident "where" synProps:propertyDef* synSet:setDef* synCalls:callbackDef* synNodes:nodeDef* : command => do
   let props ← synProps.mapM parseProp
-
   let nodeNames ← synNodes.mapM getNodeName
   let propNames := props.map Prod.fst
-
   let setNames ← synSet.mapM parseSet
-
   let propSet := arrToMap propNames
-
   let callNames ← synCalls.mapM (λx => (·, false) <$> parseCall propSet x)
   let callNames := callNames.append (props.filterMap $ λx => match x.snd with |.span => some ((x.fst, #[]), true) | _ => none)
-
   let callStrs := callNames.map Prod.fst
-
   let names := Names.mk (HashMap.ofList setNames.toList) propSet (arrToMap (callStrs.map Prod.fst)) (arrToMap nodeNames) callStrs
-
   let nodes ← synNodes.mapM (parseNode names)
   let storage := Storage.mk props callNames
-
   let grammar := Grammar.mk storage nodes
   let machine := Parse.Lowering.translate grammar
 
-  Parse.Compile.C.compile name machine
+  Parse.Compile.LeanC.compile name machine

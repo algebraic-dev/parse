@@ -19,7 +19,7 @@ open Lean
 scoped instance : Hashable Char where
   hash x := x.val.toUInt64
 
-/-- Check is the condition of an if -/
+--| Check is the condition of an if
 inductive Check where
   | char (char: Char)
   | range (range: Range)
@@ -142,10 +142,9 @@ def groupActions (alts: Array (Char × UInt64 × Instruction false)) : Array (Ch
         Check.char (scrutinee.get! 0)
       else
         let int := (Interval.ofChars scrutinee)
-        if int.size != 1 then
-          Check.interval int
-        else
-          Check.range (int.get! 0)
+        if int.size != 1
+          then Check.interval int
+          else Check.range (int.get! 0)
     (check, action)
 
 def actionsToConsumer (alts: Array (Check × Instruction false)) (otherwise: Instruction false) : Consumer (Instruction false) :=
@@ -184,12 +183,11 @@ partial def compileTree (jump: Nat) (b: Bool) : Tree Specialize.Action → Compi
 
     match b with
     | true =>
-      pure (if jump != 0 then Instruction.next jump result else result)
+      pure (gotoNext jump result)
     | false => do
       let place ← CompileM.addNode
       CompileM.setNode place (Inst.mk true result)
-      let result := Instruction.goto place
-      pure (if jump != 0 then Instruction.next jump result else result)
+      pure (gotoNext jump (Instruction.goto place))
 
 def compile' (grammar: Grammar) : CompileM Unit := do
   StateT.modifyGet (((), ·) ∘ (λx => {x with storage := grammar.storage }))
@@ -202,6 +200,6 @@ def compile' (grammar: Grammar) : CompileM Unit := do
     let inst ← compileTree 0 true tree
     CompileM.setNode idx (Inst.mk true inst)
 
-/-- Translates a Grammar into a Machine -/
+--| Translates a Grammar into a Machine
 def translate (grammar: Grammar) : Machine :=
   CompileM.run (compile' grammar)
