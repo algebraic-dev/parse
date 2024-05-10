@@ -276,4 +276,4 @@ elab "parser " name:ident "in" lang:ident "where" synProps:propertyDef* synSet:s
   match lang with
   | `(C) => Parse.Compile.C.compile name machine
   | `(Lean) => Parse.Compile.LeanC.compile name machine
-  | _ => Lean.log "cannot find backend"
+  | syn => throwErrorAt syn "cannot find backend"
