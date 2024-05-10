@@ -182,7 +182,8 @@ mutual
       let props := props.map (λprop => mkIdent $ Name.mkStr1 $ s!"prop_{propsNames[prop]!}")
       let props ← props.mapM (λprop => `(cExpr| lean_unsigned_to_nat(data->$prop)))
 
-      let props := Array.append #[← `(cExpr| data->callbacks.$name), ← `(cExpr| data->data)] props
+      let props := Array.append #[← `(cExpr| data->callbacks.$name)] props
+      let props := props.push (← `(cExpr| data->data))
       let props := props.push (← `(cExpr| lean_io_mk_world()))
       let propsArr := withComma props
 
@@ -460,10 +461,9 @@ def bitMaps (maps: HashMap Interval Nat) : CommandElabM (Array (TSyntax  `Alloy.
 def compile (name: Ident) (machine: Machine) : CommandElabM Unit := do
 
   let params ← machine.storage.callback.mapM (λ(x, isSpan) => do
-    let typ ← if isSpan then `(Nat → Nat → ByteArray → α → IO (α × Int)) else
-      let ret ← `(IO (α × Int))
-      let res ← x.snd.foldlM (λx _ => `(Nat → $x)) ret
-      `(α → $res)
+    let typ ← if isSpan then `(Nat → Nat → ByteArray → α → IO (α × Nat)) else
+      let ret ← `(α → IO (α × Nat))
+      x.snd.foldlM (λx _ => `(Nat → $x)) ret
 
     `(Lean.Parser.Term.bracketedBinderF | ($(newIdent s!"on_{x.fst}") : $typ)))
 
@@ -486,7 +486,7 @@ def compile (name: Ident) (machine: Machine) : CommandElabM Unit := do
   let alloy_parse ← mangledName "alloy_parse"
 
   let fields := machine.storage.callback.map $ λ((name, _), _) => mkIdent $ Name.mkStr1 s!"on_{name}"
-  let applies ← fields.mapM $ λname => `(cStmtLike| lean_apply_1(f, new_data->callbacks.$name))
+  let applies ← fields.mapM $ λname => `(cStmtLike| {lean_inc(f); lean_apply_1(f, new_data->callbacks.$name)})
   let finalizers ← fields.mapM $ λname => `(cStmtLike| lean_dec(s->callbacks.$name))
   let incs ← fields.mapM $ λname => `(cStmtLike| lean_inc(new_data->callbacks.$name))
 
@@ -512,13 +512,11 @@ def compile (name: Ident) (machine: Machine) : CommandElabM Unit := do
 
       alloy c opaque_extern_type $(newIdent "Data") (α: Type) => $data_t:ident where
         $(newIdent "foreach")(new_data, f) := {
-          lean_inc(new_data->str);
-          lean_inc(new_data->data);
-          {$incs*}
-
+          lean_inc(f);
           lean_apply_1(f, new_data->data);
+          lean_inc(f);
           lean_apply_1(f, new_data->str);
-          {$applies*}
+          {$applies*};
         }
         $(newIdent "finalize")(s) := {
           lean_dec(s->data);
@@ -529,7 +527,7 @@ def compile (name: Ident) (machine: Machine) : CommandElabM Unit := do
 
 
       alloy c extern
-      def $(newIdent "create") {α: Type} (info: α) $params* : IO ($(newIdent "Data") α) := {
+      def $(newIdent "create") {α: Type} (info: α) $params* : ($(newIdent "Data") α) := {
         $data_t:ident* data = ($data_t:ident*)calloc(1, sizeof($data_t:ident));
         data->data = info;
         data->str = lean_mk_string_from_bytes("uwu", 3);
@@ -538,7 +536,7 @@ def compile (name: Ident) (machine: Machine) : CommandElabM Unit := do
 
         lean_object* data_obj = to_lean<$data>(data);
 
-        return lean_io_result_mk_ok(data_obj);
+        return data_obj
       }
 
       alloy c extern
@@ -598,7 +596,7 @@ def compile (name: Ident) (machine: Machine) : CommandElabM Unit := do
       }
 
       alloy c extern
-      def $(mkIdent $ Name.mkStr2 "Data" "data") {α: Type} [Inhabited α] (data_obj: @& $(newIdent "Data") α) : α := {
+      def $(mkIdent $ Name.mkStr2 "Data" "info") {α: Type} [Inhabited α] (data_obj: @& $(newIdent "Data") α) : α := {
         $data_t:ident* data = lean_get_external_data(data_obj);
         lean_inc(data->data);
         return data->data;

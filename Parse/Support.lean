@@ -26,11 +26,8 @@ def SubArray.consume (consume: Nat) (sub: SubArray) : SubArray :=
 def SubArray.size (sub: SubArray) : Nat :=
   sub.end_ - sub.start
 
-def SubArray.get (sub: SubArray) (pointer: Fin sub.array.size) : UInt8 :=
-  sub.array.get pointer
-
 def SubArray.get! (sub: SubArray) (pointer: Nat) : UInt8 :=
-  sub.array.get! pointer
+  sub.array.get! (pointer + sub.start)
 
 def SubArray.current (sub: SubArray) : UInt8 :=
   sub.array[sub.start]!

@@ -102,7 +102,7 @@ def compileDataStruct (storage: Storage) : CommandElabM (TSyntax `command) := do
     let typ := compileTyp typ
     `(structExplicitBinder| ($name:ident : $typ))
 
-  let errored ← `(structExplicitBinder| (errored : Option Nat))
+  let errored ← `(structExplicitBinder| (error : Nat))
   let state ← `(structExplicitBinder| (state: $(mkIdent $ Name.mkStr1 "States")))
   let ptr ← `(structExplicitBinder| (pointer: Nat))
   let info ← `(structExplicitBinder| (info: α))
@@ -120,6 +120,7 @@ def enumStates (machine: Machine) : CommandElabM (TSyntax `command) := do
   let states := states.push (← `(ctor| | $(newIdent "failed"):ident))
   `(inductive $(newIdent "States") where
       $states*
+      deriving Repr
   )
 
 def alloyParse (name: Ident) (branches: Array (TSyntax `Lean.Parser.Term.matchAltExpr)) : CommandElabM (TSyntax `command) := do
@@ -166,7 +167,6 @@ partial def ifStmt (code: Code) (comparison: TSyntax `term) (ok: Instruction fal
 partial def compileConsumer (code: Code) : Consumer (Instruction false) → CompileM Code
   | .is str ok otherwise => do
     let cur ← CompileM.get CompileEnv.state
-    let n := mkNumLit (str.toSubstring.bsize)
     let str := TSyntax.mk $ Syntax.mkStrLit str
     let state := genParseIdent "state" cur
     let state := mkIdent $ Name.mkStr2 "States" state.getId.toString
@@ -231,11 +231,11 @@ partial def compileCode (code: Code) : Call → CompileM Code
   | .mulAdd n => do
     let names ← CompileM.get CompileEnv.names
     let name := newIdent names[n]!
-    return code.push (← `(Lean.Parser.Term.doSeqItem| let data := { data with $name:ident := data.$name * 10 + input.current.toNat };))
+    return code.push (← `(Lean.Parser.Term.doSeqItem| let data := { data with $name:ident := data.$name * 10 + (input.current.toNat - 48) };))
   | .loadNum n => do
     let names ← CompileM.get CompileEnv.names
     let name := newIdent names[n]!
-    return code.push (← `(Lean.Parser.Term.doSeqItem| let data := { data with $name:ident := input.current.toNat };))
+    return code.push (← `(Lean.Parser.Term.doSeqItem| let data := { data with $name:ident := (input.current.toNat - 48) };))
   | .callStore prop call => do
     let names ← CompileM.get CompileEnv.calls
     let propsNames ← CompileM.get CompileEnv.names
@@ -313,7 +313,7 @@ partial def compileInstruction (code: Code) : Instruction β → CompileM Code
     let state := mkIdent $ Name.mkStr2 "States" state.getId.toString
     return code.push (← `(Lean.Parser.Term.doSeqItem | return (← $internalIdent:ident data input $state)))
   | .error errCode => do
-    let code := code.push (← `(Lean.Parser.Term.doSeqItem | let data := {data with errored := some $(mkNumLit errCode)};))
+    let code := code.push (← `(Lean.Parser.Term.doSeqItem | let data := {data with error := $(mkNumLit errCode)};))
     let state := mkIdent $ Name.mkStr2 "States" "failed"
     return code.push (← `(Lean.Parser.Term.doSeqItem | return (data, $state);))
 
@@ -364,7 +364,7 @@ def create (machine: Machine) : CommandElabM (TSyntax `command) := do
       $(mkIdent $ Name.mkStr2 "Data" "mk")
         $binders*
         $props*
-        none
+        0
         $name
         0
         info

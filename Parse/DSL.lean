@@ -258,7 +258,7 @@ def arrToMap [BEq α] [Hashable α] (arr: Array α) : HashMap α Nat :=
   arr.mapIdx ((·, ·))
   |> Array.foldl (λmap (idx, value) => map.insert value idx) HashMap.empty
 
-elab "parser " name:ident "where" synProps:propertyDef* synSet:setDef* synCalls:callbackDef* synNodes:nodeDef* : command => do
+elab "parser " name:ident "in" lang:ident "where" synProps:propertyDef* synSet:setDef* synCalls:callbackDef* synNodes:nodeDef* : command => do
   let props ← synProps.mapM parseProp
   let nodeNames ← synNodes.mapM getNodeName
   let propNames := props.map Prod.fst
@@ -273,4 +273,7 @@ elab "parser " name:ident "where" synProps:propertyDef* synSet:setDef* synCalls:
   let grammar := Grammar.mk storage nodes
   let machine := Parse.Lowering.translate grammar
 
-  Parse.Compile.LeanC.compile name machine
+  match lang with
+  | `(C) => Parse.Compile.C.compile name machine
+  | `(Lean) => Parse.Compile.LeanC.compile name machine
+  | _ => Lean.log "cannot find backend"
