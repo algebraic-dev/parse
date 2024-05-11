@@ -1,9 +1,10 @@
 # Parse.lean
 
-It"s a protocol parser generator for Lean4, currently, it only generates Lean4. It uses lean macros to generate lean code that is optimized. It's based on https://github.com/nodejs/llparse.
+It"s a protocol parser generator for Lean4 based on https://github.com/nodejs/llparse. It currently generates
+parsers in Lean and C. The Lean version is in most cases 2 times slower than the C version right now.
 
 ```lean
-parser Http where
+parser Http in Lean where
     def method : Nat
     def url : Nat × Nat
 
