@@ -5,6 +5,7 @@ import Lean.Parser.Extra
 import Init.Meta
 
 import Parse.Lowering
+import Parse.Compile.Helpers
 
 /-!
   Compiles a [Parse.Syntax.Grammar] into Lean
@@ -15,7 +16,7 @@ namespace Parse.Compile.LeanC
 open Lean.Elab Command Term Lean Parser Command Std
 open Parse.Syntax Parse.Lowering
 
---| State of the compilation in order to help compiling stuff.
+/-- State of the compilation in order to help compiling stuff. -/
 structure CompileEnv where
   state : Nat
   names : Array String
@@ -47,24 +48,9 @@ def CompileM.getInterval (int: Interval) : CompileM Ident := do
     CompileM.modify (λstate => { state with maps := state.maps.insert int state.maps.size })
     gen size
 
-def newIdent : String → Ident := mkIdent ∘ Name.mkStr1
-
-def withComma (alts: Array (TSyntax α)) : Syntax.TSepArray α "," :=
-  alts.foldl Syntax.TSepArray.push (Syntax.TSepArray.mk #[] (sep := ","))
+def internalIdent := newIdent "internalParse"
 
 def compileTyp (_: Typ) : Ident := newIdent "Nat"
-
-def genParseIdent (name: String) (num: Nat) : Ident :=
-  mkIdent (Name.mkStr1 s!"parse_{name}_{num}")
-
-def mkNumLit [ToString α] (x: α) : TSyntax `num :=
-  TSyntax.mk (Syntax.mkNumLit (ToString.toString x))
-
-def mkCharLit (char: Char) : TSyntax `num :=
-  mkNumLit char.toNat
-
-def mkStrLit (str: String) : TSyntax `str :=
-  TSyntax.mk $ Syntax.mkStrLit str
 
 def genBitMap (name: Ident) (int: Interval) : CommandElabM (TSyntax `command) := do
   let mut alts := #[]
@@ -90,7 +76,7 @@ def callbackTyp (callback: (String × Array Nat)) : CommandElabM (TSyntax `term)
 
 def compileDataStruct (storage: Storage) : CommandElabM (TSyntax `command) := do
   let callbackFields ← storage.callback.mapM $ λ(callback, isSpan) => do
-    let name := mkIdent $ Name.mkStr1 s!"on_{callback.fst}"
+    let name := createOnIdent callback.fst
     if isSpan then
       `(structExplicitBinder| ($name:ident : Nat → Nat → ByteArray → α → IO (α × Nat)))
     else
@@ -125,12 +111,12 @@ def enumStates (machine: Machine) : CommandElabM (TSyntax `command) := do
 
 def alloyParse (name: Ident) (branches: Array (TSyntax `Lean.Parser.Term.matchAltExpr)) : CommandElabM (TSyntax `command) := do
   let alts := mkNode ``Term.matchAlts #[mkNullNode branches]
-  `(partial def $name:ident {α: Type} (data: $(newIdent "Data") α) (input: $(newIdent "SubArray")) : $(newIdent "States") → IO ($(newIdent "Data") α × $(newIdent "States")) $alts:matchAlts)
-
-def internalIdent := newIdent "internalParse"
-
-def inDo (code: Code) : CompileM (TSyntax `term) :=
-  `(term| (do $code*))
+  `(partial def $name:ident
+      {α: Type}
+      (data: $(newIdent "Data") α)
+      (input: $(newIdent "SubArray"))
+      : $(newIdent "States") → IO ($(newIdent "Data") α × $(newIdent "States"))
+      $alts:matchAlts)
 
 def genCheck (code: Code) : CompileM Code := do
   let cur ← CompileM.get CompileEnv.state
@@ -139,9 +125,9 @@ def genCheck (code: Code) : CompileM Code := do
   return code.push (← `(Lean.Parser.Term.doSeqItem | if (input.isEmpty) then return (data, $state);))
 
 def compileRange (name: TSyntax `term) (range: Lowering.Range) : CommandElabM (TSyntax `term) := do
-  let fstChar : TSyntax `num := mkCharLit $ Char.ofNat (range.val.fst.toNat)
+  let fstChar : TSyntax `num := mkNumLit range.val.fst.toNat
   if range.val.fst != range.val.snd then
-    let sndChar : TSyntax `num := mkCharLit $ Char.ofNat (range.val.snd.toNat)
+    let sndChar : TSyntax `num := mkNumLit range.val.snd.toNat
     if range.val.fst == range.val.snd - 1
       then `(($name == $fstChar || $name == $sndChar))
       else `(($name >= $fstChar && $name <= $sndChar))
@@ -152,7 +138,7 @@ def compileInterval (int: Interval) : CompileM (TSyntax `term) := do
 
 def compileCheck (check: Check) : CompileM (TSyntax `term) := do
   match check with
-  | .char c => `(input.current == $(mkCharLit c))
+  | .char c => `(input.current == $(mkNumLit c.toNat))
   | .range range => compileRange (← `(input.current)) range
   | .interval int => compileInterval int
 
@@ -179,13 +165,13 @@ partial def compileConsumer (code: Code) : Consumer (Instruction false) → Comp
         return (data, $state)
       | .failed => do
         $otherwise*
-      | .succeded => do
+      | .succeeded => do
         $then_*
     )
     return code.push stmt
   | .char chr ok otherwise => do
     let code ← genCheck code
-    let comparison ← `(input.current == $(mkCharLit chr))
+    let comparison ← `(input.current == $(mkNumLit chr.toNat))
     ifStmt code comparison ok otherwise
   | .range range ok otherwise => do
     let code ← genCheck code
@@ -200,7 +186,7 @@ partial def compileConsumer (code: Code) : Consumer (Instruction false) → Comp
     let otherwise ← compileInstruction #[] otherwise
     let alts ← alts.mapM $ λ(case, to) => do
       let next ← compileInstruction #[] to
-      `(Lean.Parser.Term.matchAltExpr| | $(mkCharLit case) => do $next*)
+      `(Lean.Parser.Term.matchAltExpr| | $(mkNumLit case.toNat) => do $next*)
     let alts := alts.push (← `(Lean.Parser.Term.matchAltExpr| | _ => do $otherwise*))
     let alts := mkNode ``Term.matchAlts #[mkNullNode alts]
     let matcher ← `(Lean.Parser.Term.«match»| match input.current with $alts)
@@ -209,11 +195,10 @@ partial def compileConsumer (code: Code) : Consumer (Instruction false) → Comp
   | .mixed alts otherwise => do
     let code ← genCheck code
     let otherwise ← compileInstruction #[] otherwise
-    let alts ← alts.mapM $ λ(check, to) => do
+    let alts ← alts.foldlM (init := otherwise) $ λacc (check, to) => do
       let next ← compileInstruction #[] to
       let map ← compileCheck check
-      `(Lean.Parser.Term.doSeqItem| if ($map) then $next*)
-    let alts := alts.append otherwise
+      return #[← `(Lean.Parser.Term.doSeqItem| if ($map) then $next* else $acc*)]
     return code.append alts
 
 partial def compileCode (code: Code) : Call → CompileM Code
@@ -221,7 +206,7 @@ partial def compileCode (code: Code) : Call → CompileM Code
     let names ← CompileM.get CompileEnv.calls
     let propsNames ← CompileM.get CompileEnv.names
     let (name, props) := names[n]!
-    let name := newIdent s!"on_{name}"
+    let name := createOnIdent name
     let props := props.map (λprop => mkIdent $ Name.mkStr1 $ propsNames[prop]!)
     let props ← props.mapM (λprop => `(data.$prop))
     let props := Array.append props #[← `(data.info)]
@@ -240,7 +225,7 @@ partial def compileCode (code: Code) : Call → CompileM Code
     let names ← CompileM.get CompileEnv.calls
     let propsNames ← CompileM.get CompileEnv.names
     let (name, props) := names[call]!
-    let name := newIdent s!"on_{name}"
+    let name := createOnIdent name
     let props := props.map (λprop => mkIdent $ Name.mkStr1 $ propsNames[prop]!)
     let props ← props.mapM (λprop => `(data.$prop))
     let props := Array.append props #[← `(data.info)]
@@ -297,7 +282,7 @@ partial def compileInstruction (code: Code) : Instruction β → CompileM Code
     compileInstruction code next
   | .close prop next => do
     let names ← CompileM.get CompileEnv.names
-    let name := newIdent s!"on_{names[prop]!}"
+    let name := createOnIdent names[prop]!
     let prop := newIdent names[prop]!
     let code := code.push (← `(Lean.Parser.Term.doSeqItem | let (info, code) ← data.$name data.$prop input.start input.array data.info;))
     let code := code.push (← `(Lean.Parser.Term.doSeqItem | let data := { data with info };))
@@ -311,7 +296,7 @@ partial def compileInstruction (code: Code) : Instruction β → CompileM Code
   | .goto to => do
     let state := genParseIdent "state" to
     let state := mkIdent $ Name.mkStr2 "States" state.getId.toString
-    return code.push (← `(Lean.Parser.Term.doSeqItem | return (← $internalIdent:ident data input $state)))
+    return code.push (← `(Lean.Parser.Term.doSeqItem | $internalIdent:ident data input $state))
   | .error errCode => do
     let code := code.push (← `(Lean.Parser.Term.doSeqItem | let data := {data with error := $(mkNumLit errCode)};))
     let state := mkIdent $ Name.mkStr2 "States" "failed"
@@ -350,10 +335,10 @@ def create (machine: Machine) : CommandElabM (TSyntax `command) := do
     let typ ← if isSpan then `(Nat → Nat → ByteArray → α → IO (α × Nat)) else
       let ret ← `(α → IO (α × Nat))
       x.snd.foldlM (λx _ => `(Nat → $x)) ret
-    `(Lean.Parser.Term.bracketedBinderF| ($(newIdent s!"on_{x.fst}") : $typ))
+    `(Lean.Parser.Term.bracketedBinderF| ($(createOnIdent x.fst) : $typ))
 
   let binders ← machine.storage.callback.mapM $ λ(x, _) =>
-    `(term| $(newIdent s!"on_{x.fst}"):ident )
+    `(term| $(createOnIdent x.fst):ident )
 
   let props ← machine.storage.props.mapM $ λ_ => `(term| Inhabited.default)
   let name := genParseIdent "state" 0
@@ -361,13 +346,7 @@ def create (machine: Machine) : CommandElabM (TSyntax `command) := do
 
   `(
     def $(newIdent "create") {α: Type} (info: α) $params* : ($(newIdent "Data") α) :=
-      $(mkIdent $ Name.mkStr2 "Data" "mk")
-        $binders*
-        $props*
-        0
-        $name
-        0
-        info
+      $(mkIdent $ Name.mkStr2 "Data" "mk") $binders* $props* 0 $name 0 info
   )
 
 def compile (name: Ident) (machine: Machine) : CommandElabM Unit := do
@@ -375,14 +354,15 @@ def compile (name: Ident) (machine: Machine) : CommandElabM Unit := do
 
   let support : Ident := mkIdent `Parse.Support
 
-  let commands := #[← `(namespace $name), ← `(open $support:ident)]
-  let commands := commands.append (← bitMaps maps)
-  let commands := commands.push  (← enumStates machine)
-  let commands := commands.push (← compileDataStruct machine.storage)
-  let commands := commands.push (← alloyParse internalIdent branches)
-  let commands := commands.push (← parser)
-  let commands := commands.push (← create machine)
-  let commands := commands.push (← `(end $name))
+  elabCommand (← `(namespace $name))
+  elabCommand (← `(open $support:ident))
 
-  for command in commands do
+  for command in (← bitMaps maps) do
     elabCommand command
+
+  elabCommand (← enumStates machine)
+  elabCommand (← compileDataStruct machine.storage)
+  elabCommand (← alloyParse internalIdent branches)
+  elabCommand (← parser)
+  elabCommand (← create machine)
+  elabCommand (← `(end $name))

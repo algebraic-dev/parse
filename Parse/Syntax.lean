@@ -6,14 +6,14 @@ namespace Parse.Syntax
 
 abbrev Goto := Nat
 
---| Indicates if the capture is setting the beginning or the end of a capture
+/-- Indicates if the capture is setting the beginning or the end of a capture -/
 inductive Capture
   | begin
   | close
   | data
   deriving Inhabited, Hashable, Repr
 
---| Calls that can change the state of the parser
+/-- Calls that can change the state of the parser -/
 inductive Call where
   | arbitrary (name: Nat)
   | mulAdd (prop: Nat)
@@ -22,7 +22,7 @@ inductive Call where
   | store (prop: Nat) (num: Nat)
   deriving Inhabited, Hashable, Repr
 
---| Action that happens after something is matched with a matcher
+/-- Action that happens after something is matched with a matcher -/
 inductive Action
   | store (capture: Capture) (property: Nat) (goto: Action)
   | consume (property: Nat) (goto: Action)
@@ -36,7 +36,7 @@ inductive MethodOrCall
   | call (call: Call)
   deriving Repr, Hashable
 
---| An alternative for matching strings
+/-- An alternative for matching strings -/
 inductive Case
   | is (matchers: Array String) (action : Action)
   | peek (matchers: Array Char) (action : Action)
@@ -45,13 +45,13 @@ inductive Case
   | goto (consume: Bool) (action : Action)
   deriving Inhabited
 
---| Node is some state with a bunch of matchers that can change the state and perform some actions
+/-- Node is some state with a bunch of matchers that can change the state and perform some actions -/
 structure Node where
   name: String
   cases: Array Case
   deriving Inhabited
 
---| Typ is a type representation from C
+/-- Typ is a type representation from C -/
 inductive Typ
   | u8
   | char
@@ -61,13 +61,13 @@ inductive Typ
   | span
   deriving Inhabited
 
---| Storage describes each field that stores some information in
+/-- Storage describes each field that stores some information in -/
 structure Storage where
   props: Array (String × Typ)
   callback: Array ((String × Array Nat) × Bool)
   deriving Inhabited
 
---| Description of a parser
+/-- Description of a parser -/
 structure Grammar where
   storage: Storage
   nodes: Array Node

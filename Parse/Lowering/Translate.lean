@@ -19,7 +19,7 @@ open Lean
 scoped instance : Hashable Char where
   hash x := x.val.toUInt64
 
---| Check is the condition of an if
+/-- Check is the condition of an if -/
 inductive Check where
   | char (char: Char)
   | range (range: Range)
@@ -165,7 +165,7 @@ partial def compileTree (jump: Nat) (b: Bool) : Tree Specialize.Action → Compi
   | .fail => return Instruction.error 0
   | .done step => return compileStep jump step
   | .branch branches default => do
-    let otherwise := compileStep jump (α := false) default
+    let otherwise := compileStep 0 (α := false) default
     let result ←
       match branches with
       | .string branch =>
@@ -200,6 +200,6 @@ def compile' (grammar: Grammar) : CompileM Unit := do
     let inst ← compileTree 0 true tree
     CompileM.setNode idx (Inst.mk true inst)
 
---| Translates a Grammar into a Machine
+/-- Translates a Grammar into a Machine -/
 def translate (grammar: Grammar) : Machine :=
   CompileM.run (compile' grammar)

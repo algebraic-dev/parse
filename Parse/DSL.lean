@@ -258,7 +258,7 @@ def arrToMap [BEq α] [Hashable α] (arr: Array α) : HashMap α Nat :=
   arr.mapIdx ((·, ·))
   |> Array.foldl (λmap (idx, value) => map.insert value idx) HashMap.empty
 
-elab "parser " name:ident "in" lang:ident "where" synProps:propertyDef* synSet:setDef* synCalls:callbackDef* synNodes:nodeDef* : command => do
+scoped elab "parser " name:ident "in" lang:ident "where" synProps:propertyDef* synSet:setDef* synCalls:callbackDef* synNodes:nodeDef* : command => do
   let props ← synProps.mapM parseProp
   let nodeNames ← synNodes.mapM getNodeName
   let propNames := props.map Prod.fst
