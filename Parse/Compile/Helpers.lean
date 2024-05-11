@@ -6,13 +6,13 @@ import Init.Meta
 
 import Parse.Lowering
 
-/-!
-  Helpers for building the translator for instruction to actual code.
--/
-
 namespace Parse.Compile
 
 open Lean.Elab Command Term Lean Parser Command Std
+
+/-!
+  Helpers for building the translator for instruction to actual code.
+-/
 
 def mkNumLit (x: Nat) : TSyntax `num :=
   TSyntax.mk (Syntax.mkNumLit (ToString.toString x))

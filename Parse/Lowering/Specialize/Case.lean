@@ -1,10 +1,10 @@
 import Parse.Syntax
 
+namespace Parse.Lowering.Specialize
+
 /-!
   Definition of a [Case] that is something that is in the middle of a match problem
 -/
-
-namespace Parse.Lowering.Specialize
 
 -- Just to be able to hash prefixes
 scoped instance : Hashable Char where

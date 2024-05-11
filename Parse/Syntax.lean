@@ -1,8 +1,8 @@
+namespace Parse.Syntax
+
 /-!
   High-Level Syntax Definition
 -/
-
-namespace Parse.Syntax
 
 abbrev Goto := Nat
 

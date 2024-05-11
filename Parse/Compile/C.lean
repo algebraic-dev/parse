@@ -10,15 +10,15 @@ import Alloy.C.Grammar
 import Parse.Lowering
 import Parse.Compile.Helpers
 
-/-!
-  Compiles a [Parse.Syntax.Grammar] into C using the alloy library
--/
-
 namespace Parse.Compile.C
 
 open scoped Alloy.C
 open Lean.Elab Command Term Lean Parser Command Std
 open Parse.Syntax Parse.Lowering
+
+/-!
+  Compiles a [Parse.Syntax.Grammar] into C using the alloy library
+-/
 
 structure CompileEnv where
   state : Nat

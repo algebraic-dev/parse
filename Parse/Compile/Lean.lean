@@ -7,14 +7,14 @@ import Init.Meta
 import Parse.Lowering
 import Parse.Compile.Helpers
 
-/-!
-  Compiles a [Parse.Syntax.Grammar] into Lean
--/
-
 namespace Parse.Compile.LeanC
 
 open Lean.Elab Command Term Lean Parser Command Std
 open Parse.Syntax Parse.Lowering
+
+/-!
+  Compiles a [Parse.Syntax.Grammar] into Lean
+-/
 
 /-- State of the compilation in order to help compiling stuff. -/
 structure CompileEnv where

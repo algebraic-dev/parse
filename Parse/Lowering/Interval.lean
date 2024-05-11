@@ -1,9 +1,9 @@
+namespace Parse.Lowering.Interval
+
 /-!
   Definition of ASCII character intervals, useful to compile down to a definition that is the most
   efficient to check if some character is on a range.
 -/
-
-namespace Parse.Lowering.Interval
 
 /-- Range of well formed ASCII characters -/
 abbrev Range := {range: UInt8 × UInt8 // range.fst ≤ range.snd }

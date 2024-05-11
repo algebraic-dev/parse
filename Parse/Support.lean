@@ -2,6 +2,10 @@ namespace Parse.Support
 
 set_option linter.all true
 
+/-!
+  Support module for the Lean Generator. It is used by the generated code to parse
+-/
+
 /-- Section of a ByteArray used for indexing and cutting byte arrays in constant time -/
 structure SubArray where
   /-- The internal array -/

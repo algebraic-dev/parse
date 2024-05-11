@@ -8,14 +8,14 @@ import Parse.Lowering
 import Parse.Compile.C
 import Parse.Compile.Lean
 
-/-!
-  DSL to build a [Parse.Syntax.Grammar] and compile to a module parser inside of the module.
--/
-
 namespace Parse.DSL
 
 open Lean.Elab Command Term Lean Parser Command Std
 open Parse.Syntax
+
+/-!
+  DSL to build a [Parse.Syntax.Grammar] and compile to a module parser inside of the module.
+-/
 
 -- Syntax definitions
 

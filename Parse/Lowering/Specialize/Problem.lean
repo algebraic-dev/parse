@@ -2,13 +2,13 @@ import Parse.Lowering.Specialize.Case
 import Parse.Syntax
 import Lean.Data
 
-/-!
-  Definition of a [Problem] that is a matrix of problems with ASCII chars that matches some input
--/
-
 namespace Parse.Lowering.Specialize
 
 open Lean
+
+/-!
+  Definition of a [Problem] that is a matrix of problems with ASCII chars that matches some input
+-/
 
 abbrev Problem (α: Type) := Array (Case α)
 

@@ -3,15 +3,15 @@ import Parse.Lowering.Specialize.Case
 import Parse.Lowering.Interval
 import Parse.Syntax
 
-/-!
-  This module specializes a bunch of parsers that looks like pattern match to a tree that matches
-  one thing at a time.
--/
-
 namespace Parse.Lowering.Specialize
 
 open Parse.Lowering.Interval
 open Parse.Syntax
+
+/-!
+  This module specializes a bunch of parsers that looks like pattern match to a tree that matches
+  one thing at a time.
+-/
 
 abbrev Fuel := Nat
 

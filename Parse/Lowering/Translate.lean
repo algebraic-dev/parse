@@ -1,12 +1,7 @@
 import Parse.Lowering.Interval
 import Parse.Lowering.Specialize
 import Parse.Syntax
-
 import Lean.Data
-
-/-!
-  Translate a specialized tree into a set of instructions that matches some input.
--/
 
 namespace Parse.Lowering.Translate
 
@@ -14,6 +9,10 @@ open Parse.Lowering.Interval
 open Parse.Lowering.Specialize
 open Parse.Syntax
 open Lean
+
+/-!
+  Translate a specialized tree into a set of instructions that matches some input.
+-/
 
 -- Just to be able to hash prefixes
 scoped instance : Hashable Char where
