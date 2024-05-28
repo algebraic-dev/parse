@@ -13,10 +13,15 @@ inductive Capture
   | data
   deriving Inhabited, Hashable, Repr
 
+inductive Base
+  | decimal
+  | hex
+  deriving Inhabited, Hashable, Repr
+
 /-- Calls that can change the state of the parser -/
 inductive Call where
   | arbitrary (name: Nat)
-  | mulAdd (prop: Nat)
+  | mulAdd (base: Base) (prop: Nat)
   | loadNum (prop: Nat)
   | callStore (prop: Nat) (call: Nat)
   | store (prop: Nat) (num: Nat)

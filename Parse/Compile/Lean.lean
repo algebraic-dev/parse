@@ -213,10 +213,14 @@ partial def compileCode (code: Code) : Call → CompileM Code
     let code := code.push (← `(Lean.Parser.Term.doSeqItem| let (info, code) ← data.$name $props*))
     let code := code.push (← `(Lean.Parser.Term.doSeqItem | let data := { data with info };))
     return code
-  | .mulAdd n => do
+  | .mulAdd base n => do
     let names ← CompileM.get CompileEnv.names
     let name := newIdent names[n]!
-    return code.push (← `(Lean.Parser.Term.doSeqItem| let data := { data with $name:ident := data.$name * 10 + (input.current.toNat - 48) };))
+    let res ←
+      match base with
+      | .decimal => `(data.$name * 10 + (input.current.toNat - 48))
+      | .hex => `(data.$name * 16 + $(newIdent "hexCharToNat") input.current)
+    return code.push (← `(Lean.Parser.Term.doSeqItem| let data := { data with $name:ident := $res };))
   | .loadNum n => do
     let names ← CompileM.get CompileEnv.names
     let name := newIdent names[n]!

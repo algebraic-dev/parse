@@ -61,6 +61,14 @@ def SubArray.current (sub: SubArray) : UInt8 :=
 def SubArray.isEmpty (sub: SubArray) : Bool :=
   sub.start == sub.end_
 
+/-- Convert a hexadecimal character into a nat -/
+@[inline]
+def hexCharToNat (char: UInt8) : Nat :=
+  if 48 ≤ char ∧ char ≤ 57 then char.toNat - 48
+  else if 97 ≤ char ∧ char ≤ 102 then 10 + (char.toNat - 97)
+  else if 65 ≤ char ∧ char ≤ 70 then 10 + (char.toNat - 65)
+  else 0
+
 /-- State of comparison between strings. it can pause if the input is over and the matcher isnt -/
 inductive State
   /-- The match failed because two chars are different -/

@@ -35,7 +35,7 @@ scoped syntax ":" &"u64" : typ
 scoped syntax ":" &"char" : typ
 scoped syntax ":" &"span" : typ
 
-scoped syntax (name := callCode) "(" &"mulAdd" ident ")" : code
+scoped syntax (name := callCode) "(" &"mulAdd" ident ident ")" : code
 scoped syntax (name := callLoad) "(" &"loadNum" ident ")" : code
 scoped syntax (name := callStore) "(" &"callStore" ident ident ")" : code
 scoped syntax (name := callStoreNum) "(" &"store" ident num ")" : code
@@ -75,7 +75,7 @@ scoped syntax (name := nodeDef) "node " ident ("where" <|> ":=") parsers* : node
 scoped syntax (name := propertyDef) "def " ident typ : command
 scoped syntax (name := setDef) "set " ident ":=" "[" str* "]" : command
 
-scoped syntax (name := callbackDef) &"callback " ident (":" ident*)? : command
+scoped syntax (name := callbackDef) &"callback " ident ("[" ident* "]")? : command
 
 -- Construction of the Syntax
 
@@ -108,9 +108,12 @@ def parseSwitchClause (syn: TSyntax `clause) : CommandElabM (String × Nat) :=
 
 def parseCode (names: Names) (syn: Syntax) : CommandElabM Call :=
   match syn with
-  | `(callCode| (mulAdd $callback:ident)) => do
+  | `(callCode| (mulAdd $base $callback:ident)) => do
     let property ← ensure syn callback.getId.toString names.properties.find?
-    return (Call.mulAdd property)
+    match base with
+    | `(hex) => pure (Call.mulAdd .hex property)
+    | `(decimal) => pure (Call.mulAdd .decimal property)
+    | syn => Lean.throwErrorAt syn "unsupported base"
   | `(callLoad| (loadNum $callback:ident)) => do
     let property ← ensure syn callback.getId.toString names.properties.find?
     return (Call.loadNum property)
@@ -238,7 +241,7 @@ def parseProp : TSyntax `Parse.DSL.propertyDef → CommandElabM (String × Typ)
   | syn => Lean.throwErrorAt syn "unsupported syntax"
 
 def parseCall (properties: HashMap String Nat)  : TSyntax `Parse.DSL.callbackDef → CommandElabM (String × Array Nat)
-  | `(callbackDef | callback $name : $props*) => do
+  | `(callbackDef | callback $name [ $props* ]) => do
     let props ← props.mapM (λx => ensure x x.getId.toString properties.find?)
     pure (name.getId.toString, props)
   | `(callbackDef | callback $name) => do

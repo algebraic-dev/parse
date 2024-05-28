@@ -185,11 +185,16 @@ mutual
       let names ← CompileM.get CompileEnv.names
       let name := newIdent s!"prop_{names[n]!}"
       return  code.push (← `(cStmt| data->$name = *p - '0';))
-    | .mulAdd n => do
+    | .mulAdd base n => do
       let names ← CompileM.get CompileEnv.names
       let name := newIdent s!"prop_{names[n]!}"
-      let code := code.push (← `(cStmt| data->$name *= 10;))
-      return code.push (← `(cStmt| data->$name += *p - '0';))
+      match base with
+      | .decimal => do
+        let code := code.push (← `(cStmt| data->$name *= 10;))
+        return code.push (← `(cStmt| data->$name += *p - '0';))
+      | .hex => do
+        let code := code.push (← `(cStmt| data->$name *= 16;))
+        return code.push (← `(cStmt| data->$name += hex_to_dec(*p);))
     | .callStore prop call => do
       -- FIX
       let names ← CompileM.get CompileEnv.calls
