@@ -214,7 +214,6 @@ partial def compileConsumer (code: Code) : Consumer (Instruction false) → Comp
     let code := code.push (← `(Lean.Parser.Term.doSeqItem |
       if input.size < data.$prop - data.pointer then
         let data := { data with pointer := data.pointer + input.size }
-        dbg_trace s!"res ---- {data.pointer}"
         pure (data, $state)
       else
         $next*
