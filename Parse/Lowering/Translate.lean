@@ -40,6 +40,7 @@ inductive Consumer (inst: Type) where
   | map (map: Interval) (ok: inst) (err: inst)
   | chars (cases: Array (Char × inst)) (otherwise: inst)
   | mixed (cases: Array (Check × inst)) (otherwise: inst)
+  | consume (num: Nat) (ok: inst)
   deriving Repr, Hashable
 
 inductive Instruction : Bool → Type where
@@ -48,7 +49,6 @@ inductive Instruction : Bool → Type where
   | next (chars: Nat) (next: Instruction α) : Instruction α
   | store (prop: Nat) (data: Option Nat) (next: Instruction α) : Instruction α
   | capture (prop: Nat) (next: Instruction α) : Instruction α
-  | consume (prop: Nat) (next: Instruction α) : Instruction α
   | close (prop: Nat) (next: Instruction α) : Instruction α
   | call (code: Call) (next: Instruction α) : Instruction α
   | goto (to: Nat) : Instruction α
@@ -105,7 +105,6 @@ def compileAction' (data: Option Nat) : Syntax.Action → Instruction α
   | .store Capture.data prop to => Instruction.store prop data (compileAction' none to)
   | .store Capture.begin prop to => Instruction.capture prop (compileAction' none to)
   | .store Capture.close prop to => Instruction.close prop (compileAction' none to)
-  | .consume prop to => Instruction.consume prop (compileAction' none to)
   | .call prop to => Instruction.call prop (compileAction' none to)
   | .goto to => Instruction.goto to
   | .error code => Instruction.error code
@@ -163,8 +162,13 @@ def actionsToConsumer (alts: Array (Check × Instruction false)) (otherwise: Ins
 partial def compileTree (jump: Nat) (b: Bool) : Tree Specialize.Action → CompileM (Instruction b)
   | .fail => return Instruction.error 0
   | .done step => return compileStep jump step
+  | .consume prop step => do
+    let code := compileStep jump step
+    let place ← CompileM.addNode
+    CompileM.setNode place (Inst.mk true (Instruction.consumer (Consumer.consume prop code)))
+    pure (gotoNext jump (Instruction.goto place))
   | .branch branches default => do
-    let otherwise := compileStep 0 (α := false) default
+    let otherwise ← compileTree 0 false default
     let result ←
       match branches with
       | .string branch =>
@@ -177,7 +181,6 @@ partial def compileTree (jump: Nat) (b: Bool) : Tree Specialize.Action → Compi
           pure (branch.subject, Hashable.hash next, next)
         let alts := groupActions alts
         pure $ actionsToConsumer alts otherwise
-
     let result := Instruction.consumer result
 
     match b with

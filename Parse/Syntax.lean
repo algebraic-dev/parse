@@ -30,7 +30,6 @@ inductive Call where
 /-- Action that happens after something is matched with a matcher -/
 inductive Action
   | store (capture: Capture) (property: Nat) (goto: Action)
-  | consume (property: Nat) (goto: Action)
   | call (callback: Call) (goto: Action)
   | goto (goto: Goto)
   | error (code: Nat)
@@ -48,6 +47,7 @@ inductive Case
   | switch (matchers: Array (String × Nat)) (action : Action)
   | select (callback: MethodOrCall) (matchers: Array (Nat × Action)) (otherwise : Action)
   | goto (consume: Bool) (action : Action)
+  | consume (prop: Nat) (action: Action)
   deriving Inhabited
 
 /-- Node is some state with a bunch of matchers that can change the state and perform some actions -/

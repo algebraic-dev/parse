@@ -35,7 +35,7 @@ def Problem.findDone (problem: Problem α) (otherwise: α) : Case α :=
   let res := problem.find? (·.subject.isDone)
   match res with
   | some res => res
-  | none => Case.mk Subject.empty false none otherwise
+  | none => Case.mk Subject.empty false none none otherwise
 
 /-- Gives the maximum number of steps to specialize the entire tree -/
 def Problem.stepsNum (problem: Problem α) : Nat

@@ -40,7 +40,8 @@ inductive Branch (α: Type)
 
 /-- Matching tree -/
 inductive Tree (α: Type) where
-  | branch (cases: Branch (Tree α)) (default: Step α)
+  | branch (cases: Branch (Tree α)) (default: Tree α)
+  | consume (method: Nat) (step: Step α)
   | done (step: Step α)
   | fail
   deriving Hashable, Repr, Inhabited
@@ -61,12 +62,12 @@ def Problem.solve' (problem: Problem Action) : Nat → Tree Action
   | n + 1 =>
     if problem.isEmpty then Tree.fail else
     if let some res := problem.getDone then
-      Tree.done (Step.mk res.store res.capture res.action)
+      match res.read with
+      | some method => Tree.consume method (Step.mk res.store res.capture res.action)
+      | none => Tree.done (Step.mk res.store res.capture res.action)
     else
-      let otherwise := Step.ofCase $ problem.findDone (.single (Action.error 1))
+      let otherwise := problem.findDone (.single (Action.error 1))
       let (problem₂, acc) := Problem.accumulate problem "" n
-
-      -- We don't remove the fuel that is used on the accumulate, it's bad :S
       let branch := match acc.length with
       | 0 =>
         let prefixes := problem₂.prefixes.toArray
@@ -78,7 +79,7 @@ def Problem.solve' (problem: Problem Action) : Nat → Tree Action
       | _ =>
         Branch.string (Match.mk acc true (problem₂.solve' n))
 
-      Tree.branch branch otherwise
+      Tree.branch branch (Problem.solve' #[otherwise] n)
 
 /-- Solves the problem returning a tree of actions -/
 def Problem.solve (problem: Problem Action) : Tree Action :=

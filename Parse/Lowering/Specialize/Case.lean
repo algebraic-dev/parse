@@ -19,6 +19,7 @@ structure Prefix where
 inductive Action where
   | single (act: Syntax.Action)
   | select (call: Syntax.MethodOrCall) (acts: Array (Nat × Syntax.Action)) (otherwise: Syntax.Action)
+  deriving Repr
 
 /-- Subject is the string to test -/
 def Subject := Substring
@@ -37,6 +38,7 @@ structure Case (α: Type) where
   subject : Subject
   capture : Bool
   store : Option Nat
+  read : Option Nat
   action : α
   deriving Repr
 
@@ -58,12 +60,14 @@ def Case.length (case: Case α) := case.subject.bsize
 /-- Creates a case from a matcher and action -/
 def Case.ofMatcher : Parse.Syntax.Case → Array (Case Action)
   | .is strs action =>
-      strs.map ({subject := ·.toSubstring, capture := true, store := none, action := Action.single action })
+      strs.map ({subject := ·.toSubstring, capture := true, read := none, store := none, action := Action.single action })
   | .peek chars action =>
-      chars.map ({subject := ·.toString.toSubstring, capture := false, store := none, action := Action.single action })
+      chars.map ({subject := ·.toString.toSubstring, capture := false, read := none, store := none, action := Action.single action })
   | .switch cases action=>
-      cases.map (λ(str, data) => {subject := str.toSubstring, capture := true, store := some data, action := Action.single action })
+      cases.map (λ(str, data) => {subject := str.toSubstring, read := none, capture := true, store := some data, action := Action.single action })
   | .goto capture action =>
-      #[{subject := "".toSubstring, capture, store := none, action := Action.single action }]
+      #[{subject := "".toSubstring, capture, store := none, read := none, action := Action.single action }]
   | .select inv actions otherwise =>
-      #[{subject := "".toSubstring, capture := false, store := none, action := Action.select inv actions otherwise }]
+      #[{subject := "".toSubstring, capture := false, store := none, read := none, action := Action.select inv actions otherwise }]
+  | .consume prop action =>
+      #[{subject := "".toSubstring, capture := false, read := some prop, store := none, action := Action.single action }]

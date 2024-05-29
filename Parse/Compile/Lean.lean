@@ -50,7 +50,9 @@ def CompileM.getInterval (int: Interval) : CompileM Ident := do
 
 def internalIdent := newIdent "internalParse"
 
-def compileTyp (_: Typ) : Ident := newIdent "Nat"
+def compileTyp : Typ → CommandElabM (TSyntax `term)
+  | .span => `(Option Nat)
+  | _ => `(Nat)
 
 def genBitMap (name: Ident) (int: Interval) : CommandElabM (TSyntax `command) := do
   let mut alts := #[]
@@ -85,7 +87,7 @@ def compileDataStruct (storage: Storage) : CommandElabM (TSyntax `command) := do
 
   let propFields ← storage.props.mapM $ λ(name, typ) => do
     let name := newIdent name
-    let typ := compileTyp typ
+    let typ ← compileTyp typ
     `(structExplicitBinder| ($name:ident : $typ))
 
   let errored ← `(structExplicitBinder| (error : Nat))
@@ -153,9 +155,9 @@ partial def ifStmt (code: Code) (comparison: TSyntax `term) (ok: Instruction fal
 partial def compileConsumer (code: Code) : Consumer (Instruction false) → CompileM Code
   | .is str ok otherwise => do
     let cur ← CompileM.get CompileEnv.state
-    let str := TSyntax.mk $ Syntax.mkStrLit str
     let state := genParseIdent "state" cur
     let state := mkIdent $ Name.mkStr2 "States" state.getId.toString
+    let str := TSyntax.mk $ Syntax.mkStrLit str
     let then_ ← compileInstruction #[] ok
     let otherwise ← compileInstruction #[] otherwise
     let stmt ← `(Lean.Parser.Term.doSeqItem |
@@ -200,6 +202,24 @@ partial def compileConsumer (code: Code) : Consumer (Instruction false) → Comp
       let map ← compileCheck check
       return #[← `(Lean.Parser.Term.doSeqItem| if ($map) then $next* else $acc*)]
     return code.append alts
+  | .consume prop nextInst => do
+    let cur ← CompileM.get CompileEnv.state
+    let state := genParseIdent "state" cur
+    let state := mkIdent $ Name.mkStr2 "States" state.getId.toString
+    let names ← CompileM.get CompileEnv.names
+    let prop := newIdent $  names.get! prop
+    let next := code.push (← `(Lean.Parser.Term.doSeqItem | let input := input.consume (data.$prop - data.pointer);))
+    let next := next.push (← `(Lean.Parser.Term.doSeqItem | let data := { data with pointer := 0 }))
+    let next ← compileInstruction next nextInst
+    let code := code.push (← `(Lean.Parser.Term.doSeqItem |
+      if input.size < data.$prop - data.pointer then
+        let data := { data with pointer := data.pointer + input.size }
+        dbg_trace s!"res ---- {data.pointer}"
+        pure (data, $state)
+      else
+        $next*
+    ))
+    pure code
 
 partial def compileCode (code: Code) : Call → CompileM Code
   | .arbitrary n => do
@@ -210,7 +230,7 @@ partial def compileCode (code: Code) : Call → CompileM Code
     let props := props.map (λprop => mkIdent $ Name.mkStr1 $ propsNames[prop]!)
     let props ← props.mapM (λprop => `(data.$prop))
     let props := Array.append props #[← `(data.info)]
-    let code := code.push (← `(Lean.Parser.Term.doSeqItem| let (info, code) ← data.$name $props*))
+    let code := code.push (← `(Lean.Parser.Term.doSeqItem | let (info, code) ← data.$name $props*))
     let code := code.push (← `(Lean.Parser.Term.doSeqItem | let data := { data with info };))
     return code
   | .mulAdd base n => do
@@ -277,19 +297,14 @@ partial def compileInstruction (code: Code) : Instruction β → CompileM Code
   | .capture prop next => do
     let names ← CompileM.get CompileEnv.names
     let prop := newIdent s!"{names.get! prop}"
-    let code := code.push (← `(Lean.Parser.Term.doSeqItem | let data := {data with $prop:ident := input.start};))
-    compileInstruction code next
-  | .consume prop next => do
-    let names ← CompileM.get CompileEnv.names
-    let prop := newIdent $  names.get! prop
-    let code := code.push (← `(Lean.Parser.Term.doSeqItem | let input := input.consume data.$prop;))
+    let code := code.push (← `(Lean.Parser.Term.doSeqItem | let data := {data with $prop:ident := some input.start};))
     compileInstruction code next
   | .close prop next => do
     let names ← CompileM.get CompileEnv.names
     let name := createOnIdent names[prop]!
     let prop := newIdent names[prop]!
-    let code := code.push (← `(Lean.Parser.Term.doSeqItem | let (info, code) ← data.$name data.$prop input.start input.array data.info;))
-    let code := code.push (← `(Lean.Parser.Term.doSeqItem | let data := { data with info };))
+    let code := code.push (← `(Lean.Parser.Term.doSeqItem | let (info, code) ← data.$name (Option.getD data.$prop 0) input.start input.array data.info;))
+    let code := code.push (← `(Lean.Parser.Term.doSeqItem | let data := { data with info, $prop:ident := none };))
     compileInstruction code next
   | .call call next => do
     let code ← compileCode code call
@@ -325,12 +340,46 @@ def compileBranch (machine: Machine) : CommandElabM (Array (TSyntax `Lean.Parser
   let maps ← CompileEnv.maps <$> StateT.get
   return (branches, maps)
 
-def parser : CommandElabM (TSyntax `command) :=
+
+def resetSpan (name: String) : CommandElabM (TSyntax `Lean.Parser.Term.doSeqItem) := do
+  `(Lean.Parser.Term.doSeqItem |
+    let data := { data with $(newIdent name):ident := Option.map (λ_ => 0) data.$(newIdent name) }
+  )
+
+def callSpan (str: String) : CommandElabM (TSyntax `Lean.Parser.Term.doSeqItem) := do
+  let name := createOnIdent str
+  let prop := newIdent str
+  `(Lean.Parser.Term.doSeqItem|
+    let data ←
+      if let some start := data.$prop then do
+        let (info, code) ← data.$name start input.size input.array data.info;
+        pure { data with info, $prop:ident := none }
+      else pure data
+  )
+
+def spanProps (storage: Storage) : Array String :=
+  storage.props.filterMap $ λ(name, typ) =>
+    match typ with
+    | .span => name
+    | _ => none
+
+def parser (machine: Machine) : CommandElabM (TSyntax `command) := do
+
+  let names := spanProps machine.storage
+  let resetSpans ← names.mapM resetSpan
+  let callSpans ← names.mapM callSpan
+
   `(
     def $(newIdent "parse") {α: Type} (data: $(newIdent "Data") α) (s: ByteArray) : IO ($(newIdent "Data") α) := do
-      let inp := $(mkIdent $ Name.mkStr2 "SubArray" "new") s
-      let (data, res) ← $internalIdent:ident data inp data.state
+      let input := $(mkIdent $ Name.mkStr2 "SubArray" "new") s
+
+      $resetSpans*
+
+      let (data, res) ← $internalIdent:ident data input data.state
       let data := {data with state := res}
+
+      $callSpans*
+
       return data
   )
 
@@ -367,6 +416,7 @@ def compile (name: Ident) (machine: Machine) : CommandElabM Unit := do
   elabCommand (← enumStates machine)
   elabCommand (← compileDataStruct machine.storage)
   elabCommand (← alloyParse internalIdent branches)
-  elabCommand (← parser)
+
+  elabCommand (← parser machine)
   elabCommand (← create machine)
   elabCommand (← `(end $name))

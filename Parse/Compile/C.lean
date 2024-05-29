@@ -111,6 +111,11 @@ mutual
     return code.append otherwise
 
   partial def compileConsumer (code: Code) (depth: Nat) : Consumer (Instruction false) → CompileM Code
+    | .consume prop next => do
+      let names ← CompileM.get CompileEnv.names
+      let prop := newIdent s!"prop_{names.get! prop}"
+      let code := code.push (← `(cStmt| p += data->$prop;))
+      compileInstruction code (depth + 1) next
     | .is str ok otherwise => do
       let match_string ← mangledName "match_string"
       let cur ← CompileM.get CompileEnv.state
@@ -243,11 +248,6 @@ mutual
       let names ← CompileM.get CompileEnv.names
       let prop := newIdent s!"prop_{names.get! prop}_start_pos"
       let code := code.push (← `(cStmt| data->$(prop) = $pointerName;))
-      compileInstruction code (depth + 1) next
-    | .consume prop next => do
-      let names ← CompileM.get CompileEnv.names
-      let prop := newIdent s!"prop_{names.get! prop}"
-      let code := code.push (← `(cStmt| p += data->$prop;))
       compileInstruction code (depth + 1) next
     | .close prop next => do
       let names ← CompileM.get CompileEnv.names

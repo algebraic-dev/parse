@@ -45,7 +45,6 @@ scoped syntax (name := actionCallback) "call" code action_enclose: action
 scoped syntax (name := actionStore) "store" ident action_enclose: action
 scoped syntax (name := actionStart) "start" ident action_enclose: action
 scoped syntax (name := actionEnd) "end" ident action_enclose: action
-scoped syntax (name := actionConsume) "consume" ident action_enclose: action
 scoped syntax (name := actionError) "error" term : action
 scoped syntax (name := actionNode) ident : action
 
@@ -62,6 +61,8 @@ scoped syntax (name := selectDef) "select" code selectClause* &"default" "=>" ac
 scoped syntax (name := isDef) "is" str action_enclose : parsers
 scoped syntax (name := isIdentDef) "is" ident action_enclose : parsers
 scoped syntax (name := isAllDef) "is" "[" str* "]" action_enclose : parsers
+
+scoped syntax (name := consumeDef) "consume" ident action_enclose : parsers
 
 scoped syntax (name := peekDef) "peek" char action_enclose : parsers
 scoped syntax (name := peekIdentDef) "peek" ident action_enclose : parsers
@@ -152,10 +153,6 @@ partial def parseAction (names: Names) (syn: TSyntax `action) : CommandElabM Act
   | `(actionNode | $to) => do
     let to ← ensure syn to.getId.toString names.nodes.find?
     pure (Action.goto to)
-  | `(actionConsume | consume $prop:ident $to) => do
-    let property ← ensure syn prop.getId.toString names.properties.find?
-    let to ← parseEnclose names to
-    pure (Action.consume property to)
   | `(actionError | error $num:num) =>
     pure (Action.error num.getNat)
   | syn => Lean.throwErrorAt syn "unsupported syntax"
@@ -206,6 +203,10 @@ def parseMatchers (names: Names) (syn: TSyntax `parsers) : CommandElabM Case :=
   | `(peekDef | peek $chr:char $inv) => do
     let inv ← parseEnclose names inv
     pure (Case.peek #[chr.getChar] inv)
+  | `(consumeDef | consume $property $inv) => do
+    let property ← ensure syn property.getId.toString names.properties.find?
+    let inv ← parseEnclose names inv
+    pure (Case.consume property inv)
   | `(peekIdentDef | peek $ident $inv) => do
     let sets := names.definitions.find? ident.getId.toString
     match sets with
