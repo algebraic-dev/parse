@@ -194,6 +194,9 @@ mutual
       let names ← CompileM.get CompileEnv.names
       let name := newIdent s!"prop_{names[n]!}"
       match base with
+      | .octal => do
+        let code := code.push (← `(cStmt| data->$name *= 8;))
+        return code.push (← `(cStmt| data->$name += *p - '0';))
       | .decimal => do
         let code := code.push (← `(cStmt| data->$name *= 10;))
         return code.push (← `(cStmt| data->$name += *p - '0';))

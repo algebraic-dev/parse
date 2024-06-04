@@ -113,6 +113,7 @@ def parseCode (names: Names) (syn: Syntax) : CommandElabM Call :=
     let property ← ensure syn callback.getId.toString names.properties.find?
     match base with
     | `(hex) => pure (Call.mulAdd .hex property)
+    | `(octal) => pure (Call.mulAdd .octal property)
     | `(decimal) => pure (Call.mulAdd .decimal property)
     | syn => Lean.throwErrorAt syn "unsupported base"
   | `(callLoad| (loadNum $callback:ident)) => do
@@ -262,7 +263,7 @@ def arrToMap [BEq α] [Hashable α] (arr: Array α) : HashMap α Nat :=
   arr.mapIdx ((·, ·))
   |> Array.foldl (λmap (idx, value) => map.insert value idx) HashMap.empty
 
-scoped elab "parser " name:ident "in" lang:ident "where" synProps:propertyDef* synSet:setDef* synCalls:callbackDef* synNodes:nodeDef* : command => do
+scoped elab "parser " name:ident "in" lang:ident debug:&"debug"? "where" synProps:propertyDef* synSet:setDef* synCalls:callbackDef* synNodes:nodeDef* : command => do
   let props ← synProps.mapM parseProp
   let nodeNames ← synNodes.mapM getNodeName
   let propNames := props.map Prod.fst
@@ -279,5 +280,5 @@ scoped elab "parser " name:ident "in" lang:ident "where" synProps:propertyDef* s
 
   match lang with
   | `(C) => Parse.Compile.C.compile name machine
-  | `(Lean) => Parse.Compile.LeanC.compile name machine
+  | `(Lean) => Parse.Compile.LeanC.compile name machine debug.isSome
   | syn => throwErrorAt syn "cannot find backend"

@@ -14,6 +14,7 @@ inductive Capture
   deriving Inhabited, Hashable, Repr
 
 inductive Base
+  | octal
   | decimal
   | hex
   deriving Inhabited, Hashable, Repr

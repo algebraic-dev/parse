@@ -237,6 +237,7 @@ partial def compileCode (code: Code) : Call → CompileM Code
     let name := newIdent names[n]!
     let res ←
       match base with
+      | .octal => `(data.$name * 8 + (input.current.toNat - 48))
       | .decimal => `(data.$name * 10 + (input.current.toNat - 48))
       | .hex => `(data.$name * 16 + $(newIdent "hexCharToNat") input.current)
     return code.push (← `(Lean.Parser.Term.doSeqItem| let data := { data with $name:ident := $res };))
@@ -401,21 +402,27 @@ def create (machine: Machine) : CommandElabM (TSyntax `command) := do
       $(mkIdent $ Name.mkStr2 "Data" "mk") $binders* $props* 0 $name 0 info
   )
 
-def compile (name: Ident) (machine: Machine) : CommandElabM Unit := do
+def compile (name: Ident) (machine: Machine) (debug: Bool) : CommandElabM Unit := do
   let (branches, maps) ← compileBranch machine
 
   let support : Ident := mkIdent `Parse.Support
+  let mut cmds := #[]
 
-  elabCommand (← `(namespace $name))
-  elabCommand (← `(open $support:ident))
+  cmds := cmds.push (← `(namespace $name))
+  cmds := cmds.push (← `(open $support:ident))
 
   for command in (← bitMaps maps) do
-    elabCommand command
+    cmds := cmds.push command
 
-  elabCommand (← enumStates machine)
-  elabCommand (← compileDataStruct machine.storage)
-  elabCommand (← alloyParse internalIdent branches)
+  cmds := cmds.push (← enumStates machine)
+  cmds := cmds.push (← compileDataStruct machine.storage)
+  cmds := cmds.push (← alloyParse internalIdent branches)
 
-  elabCommand (← parser machine)
-  elabCommand (← create machine)
-  elabCommand (← `(end $name))
+  cmds := cmds.push (← parser machine)
+  cmds := cmds.push (← create machine)
+  cmds := cmds.push (← `(end $name))
+
+  cmds.forM elabCommand
+
+  if debug then
+    for cmd in cmds do Lean.logInfo cmd
