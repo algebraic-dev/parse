@@ -50,6 +50,18 @@ def CompileM.getInterval (int: Interval) : CompileM Ident := do
 
 def internalIdent := newIdent "internalParse"
 
+partial def consumes : Instruction β → Bool
+  | .consumer (.consume _ _) => false
+  | .consumer _ => true
+  | .select _ _ _ => false
+  | .next _ _ => true
+  | .store _ _ n => consumes n
+  | .capture _ n => consumes n
+  | .close _ n => consumes n
+  | .call _ n => consumes n
+  | .goto _ => false
+  | .error _ => false
+
 def compileTyp : Typ → CommandElabM (TSyntax `term)
   | .span => `(Option Nat)
   | _ => `(Nat)
@@ -105,10 +117,27 @@ def compileDataStruct (storage: Storage) : CommandElabM (TSyntax `command) := do
 
 def enumStates (machine: Machine) : CommandElabM (TSyntax `command) := do
   let states ← machine.nodes.mapIdxM (λi _ => `(ctor| | $(genParseIdent "state" i):ident))
+
+  let branches ← machine.names.mapIdxM λi nameStr => do
+    let name := genParseIdent "state" i
+    let res :=
+      match nameStr with
+      | some name => mkStrLit name
+      | none => mkStrLit s!"generated state {i}"
+    let name := mkIdent $ Name.mkStr2 "States" name.getId.toString
+    `(Lean.Parser.Term.matchAltExpr| | $name:ident => $res)
+
+  let branches := branches.push (← `(Lean.Parser.Term.matchAltExpr| | state => "failed"))
+  let alts := mkNode ``Term.matchAlts #[mkNullNode branches]
+
   let states := states.push (← `(ctor| | $(newIdent "failed"):ident))
   `(inductive $(newIdent "States") where
       $states*
       deriving Repr
+
+    instance : ToString $(newIdent "States") where
+      toString
+        $alts:matchAlts
   )
 
 def alloyParse (name: Ident) (branches: Array (TSyntax `Lean.Parser.Term.matchAltExpr)) : CommandElabM (TSyntax `command) := do
@@ -172,19 +201,15 @@ partial def compileConsumer (code: Code) : Consumer (Instruction false) → Comp
     )
     return code.push stmt
   | .char chr ok otherwise => do
-    let code ← genCheck code
     let comparison ← `(input.current == $(mkNumLit chr.toNat))
     ifStmt code comparison ok otherwise
   | .range range ok otherwise => do
-    let code ← genCheck code
     let comparison ← compileRange (← `(input.current)) range
     ifStmt code comparison ok otherwise
   | .map int ok otherwise => do
-    let code ← genCheck code
     let comparison ← compileInterval int
     ifStmt code comparison ok otherwise
   | .chars alts otherwise => do
-    let code ← genCheck code
     let otherwise ← compileInstruction #[] otherwise
     let alts ← alts.mapM $ λ(case, to) => do
       let next ← compileInstruction #[] to
@@ -195,7 +220,6 @@ partial def compileConsumer (code: Code) : Consumer (Instruction false) → Comp
     let matcher ← `(Lean.Parser.Term.doSeqItem| $matcher:match)
     return code.append #[matcher]
   | .mixed alts otherwise => do
-    let code ← genCheck code
     let otherwise ← compileInstruction #[] otherwise
     let alts ← alts.foldlM (init := otherwise) $ λacc (check, to) => do
       let next ← compileInstruction #[] to
@@ -333,7 +357,14 @@ def compileBranch (machine: Machine) : CommandElabM (Array (TSyntax `Lean.Parser
     CompileM.modify (λmachine => {machine with state := idx })
     let name := genParseIdent "state" idx
     let name := mkIdent $ Name.mkStr2 "States" name.getId.toString
-    let alts ← compileInstruction #[] inst.instruction
+    let code ←
+      if consumes inst.instruction then
+        genCheck #[]
+      else
+        pure #[]
+
+    let alts ← compileInstruction code inst.instruction
+
     branches := branches.push (← `(Lean.Parser.Term.matchAltExpr| | $name:ident => do $alts*))
 
   branches := branches.push (← `(Lean.Parser.Term.matchAltExpr| | state => pure (data, state)))
@@ -353,7 +384,7 @@ def callSpan (str: String) : CommandElabM (TSyntax `Lean.Parser.Term.doSeqItem) 
     let data ←
       if let some start := data.$prop then do
         let (info, code) ← data.$name start input.size input.array data.info;
-        pure { data with info, $prop:ident := none }
+        pure { data with info, $prop:ident := some 0 }
       else pure data
   )
 

@@ -35,7 +35,7 @@ def Interval.merge (intervals: Interval) : Interval := Id.run do
 /-- Creates a range that only one char belongs -/
 def Range.ofChar (char: Char) : Range :=
   let char := char.toNat.toUInt8
-  ⟨(char, char), by simp; exact (Nat.le_of_eq rfl)⟩
+  ⟨(char, char), by simp; apply Nat.le_of_eq; rfl⟩
 
 def Range.in (range: Range) (char: UInt8) : Bool :=
   range.val.fst ≤ char && char ≤ range.val.snd
